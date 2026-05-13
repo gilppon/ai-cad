@@ -23,33 +23,47 @@ class PipelineEngine:
     @circuit_breaker(failure_threshold=3, recovery_timeout=60)
     def process_pdf(self, pdf_path: str, page_index: int = 0) -> Dict[str, Any]:
         """
-        Full pipeline: PDF -> Room Detection -> Geometry -> STEP -> IFC
+        Full pipeline: PDF -> Type Detection -> Extraction (Image/Vector) -> IFC
         """
         print(f"[*] Processing PDF: {pdf_path} (Page: {page_index})")
         
-        # 1. Room Detection
-        # (Mocking room_detect for now, but in real case we call parser.room_detect)
-        try:
-            from parser.room_detect import detect_rooms
-            room_result = detect_rooms(pdf_path, page=page_index)
-        except ImportError:
-            print("[!] room_detect not found, using dummy result.")
-            room_result = self._get_dummy_room_result()
+        # 0. Detection
+        from parser.pdf_type import detect_pdf_type
+        pdf_info = detect_pdf_type(pdf_path)
+        pdf_type = pdf_info.get("pdf_type", "image")
+        print(f"[*] Detected PDF type: {pdf_type} (conf: {pdf_info.get('confidence')})")
 
-        # 2. Export Geometry JSON
-        from parser.room_export import save_rooms_json
         rooms_json_name = f"page{page_index}_rooms.json"
         rooms_json_path = os.path.join(self.output_dir, rooms_json_name)
-        
-        save_rooms_json(
-            room_result,
-            rooms_json_path,
-            page=page_index,
-            pixel_to_mm=5.0 # Standard scale
-        )
-        
-        with open(rooms_json_path, "r", encoding="utf-8") as f:
-            rooms_payload = json.load(f)
+
+        if pdf_type == "vector":
+            # 1. Vector Extraction
+            from parser.pdf_vector import extract_vector_geometry
+            rooms_payload = extract_vector_geometry(pdf_path, page_index=page_index)
+            
+            with open(rooms_json_path, "w", encoding="utf-8") as f:
+                json.dump(rooms_payload, f, indent=2)
+            print(f"[*] Saved vector geometry to {rooms_json_path}")
+        else:
+            # 1. Image-based Room Detection
+            try:
+                from parser.room_detect import detect_rooms
+                room_result = detect_rooms(pdf_path, page=page_index)
+            except Exception as e:
+                print(f"[!] room_detect failed: {e}. Using dummy.")
+                room_result = self._get_dummy_room_result()
+
+            # 2. Export Geometry JSON
+            from parser.room_export import save_rooms_json
+            save_rooms_json(
+                room_result,
+                rooms_json_path,
+                page=page_index,
+                pixel_to_mm=5.0 
+            )
+            
+            with open(rooms_json_path, "r", encoding="utf-8") as f:
+                rooms_payload = json.load(f)
         
         validate_geometry_payload(rooms_payload)
 
