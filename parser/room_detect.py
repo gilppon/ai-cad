@@ -86,59 +86,7 @@ def _dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
-def _room_type_classify(
-    rooms: List[Room],
-    width: int,
-    height: int,
-    cfg: Dict[str, Any],
-) -> None:
-    """
-    JP 최소 룰 기반 분류 (텍스트/OCR 없이 geometry로만):
-      - 가장 큰 room 1개 => LDK
-      - 작고(면적), 중앙에서 멀고(외곽), 종횡비가 크지 않은 것들 중 일부 => WET 후보
-      - 나머지 => ROOM
-    """
-    if not rooms:
-        return
 
-    # cfg thresholds
-    wet_area_ratio_max = float(cfg.get("jp_wet_area_ratio_max", 0.08))   # 전체의 8% 이하면 WET 후보
-    wet_center_dist_ratio_min = float(cfg.get("jp_wet_center_dist_ratio_min", 0.22))  # 화면 중심에서 멀면 WET 가산점
-    wet_aspect_ratio_max = float(cfg.get("jp_wet_aspect_ratio_max", 3.5))  # 너무 길쭉하면 복도일 가능성
-
-    total = float(width * height)
-    img_center = (width / 2.0, height / 2.0)
-    img_diag = (width * width + height * height) ** 0.5
-
-    # 1) 가장 큰 room을 LDK로
-    rooms_sorted = sorted(rooms, key=lambda r: r.area_px, reverse=True)
-    ldk = rooms_sorted[0]
-    ldk.kind = "LDK"
-
-    # 2) 나머지 분류
-    for r in rooms_sorted[1:]:
-        x, y, w, h = r.bbox
-        area_ratio = float(r.area_px) / total
-
-        # bbox 기반 feature
-        ar = max(w / max(1, h), h / max(1, w))
-        c = _bbox_center(r.bbox)
-        center_dist = _dist(c, img_center) / max(1.0, img_diag)
-
-        # WET scoring (아주 단순)
-        wet_score = 0.0
-        if area_ratio <= wet_area_ratio_max:
-            wet_score += 1.0
-        if center_dist >= wet_center_dist_ratio_min:
-            wet_score += 0.7
-        if ar <= wet_aspect_ratio_max:
-            wet_score += 0.3
-
-        # 결과
-        if wet_score >= 1.4:
-            r.kind = "WET"
-        else:
-            r.kind = "ROOM"
 
 
 # -----------------------------
@@ -299,8 +247,9 @@ def detect_rooms_from_walls(
                     rooms.append(Room(id=rid, contour=poly, area_px=float(area), bbox=(x, y, w, h)))
                     rid += 1
 
-    # 7) JP room type classification (LDK / WET / ROOM)
-    _room_type_classify(rooms, width, height, cfg)
+    # 7) JP room type classification (LDK / WET / ROOM / CORRIDOR / etc)
+    from parser.room_semantics import classify_rooms
+    classify_rooms(rooms, width, height)
 
     # 8) debug outputs
     debug: Dict[str, str] = {}

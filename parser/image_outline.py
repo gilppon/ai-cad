@@ -22,6 +22,7 @@ from parser.line_refine import (
 from parser.svg_export import save_lines_to_svg
 from parser.room_detect import detect_rooms_from_walls
 from parser.room_export import save_rooms_json
+from parser.preprocessing import preprocess_for_pipeline
 
 
 def save_lines_json(lines, out_dir="out", page_index=0, name="snapped"):
@@ -186,9 +187,20 @@ def extract_room_result_from_page(
     rendered_png = out_path / f"rendered_page{pno}.png"
     cv2.imwrite(str(rendered_png), img)
 
-    # 2) Edge detection
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    # 1.5) Preprocessing (Deskew, Denoise)
+    pre_res = preprocess_for_pipeline(img)
+    processed_gray = pre_res["processed"]  # This is binary (inverted) in my current preprocess_for_pipeline
+    deskew_angle = pre_res["deskew_angle"]
+    
+    preprocessed_png = out_path / f"preprocessed_page{pno}.png"
+    cv2.imwrite(str(preprocessed_png), processed_gray)
+    print(f"[STEP5] preprocessed: angle={desk_angle:.2f}" if "desk_angle" in locals() else f"[STEP5] preprocessed: angle={deskew_angle:.2f}")
+
+    # 2) Edge detection (using preprocessed binary image or deskewed gray)
+    # Since processed_gray is already binary-inverted (walls are 255), 
+    # we can use it or run Canny on it if needed. 
+    # Let's use the preprocessed image for edges.
+    edges = processed_gray
 
     edges_png = out_path / f"edges_page{pno}.png"
     cv2.imwrite(str(edges_png), edges)
@@ -281,6 +293,7 @@ def extract_room_result_from_page(
     room_res.debug["_rendered_png"] = str(rendered_png)
     room_res.debug["_edges_png"] = str(edges_png)
     room_res.debug["_overlay_png"] = str(overlay_png)
+    room_res.debug["_deskew_angle"] = deskew_angle
 
     return room_res
 

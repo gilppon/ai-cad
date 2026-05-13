@@ -12,6 +12,10 @@ class RoomKind(Enum):
     BALCONY = "balcony"
     SHAFT = "shaft"
     CLOSET = "closet"
+    ENTRANCE = "entrance"
+    WET = "wet"
+    STORAGE = "storage"
+    ROOM = "room"
     UNKNOWN = "unknown"
 
 @dataclass

@@ -2,18 +2,48 @@ import fitz  # PyMuPDF
 
 def detect_pdf_type(pdf_path):
     doc = fitz.open(pdf_path)
-
-    vector_count = 0
-    image_count = 0
+    
+    pages_info = []
+    total_vector = 0
+    total_image = 0
+    total_text_len = 0
 
     for page in doc:
-        vector_count += len(page.get_drawings())
-        image_count += len(page.get_images())
+        v_cnt = len(page.get_drawings())
+        i_cnt = len(page.get_images())
+        t_len = len(page.get_text())
+        
+        total_vector += v_cnt
+        total_image += i_cnt
+        total_text_len += t_len
+        
+        pages_info.append({
+            "index": page.number,
+            "rotation": page.rotation,
+            "width": page.rect.width,
+            "height": page.rect.height,
+            "vector_count": v_cnt,
+            "image_count": i_cnt,
+            "text_length": t_len
+        })
 
-    if vector_count > 10:
-        return {"pdf_type": "vector", "confidence": 0.9}
+    # Classification logic
+    if total_vector > 50 and total_text_len > 100:
+        pdf_type = "vector"
+        confidence = 0.95
+    elif total_image > 0:
+        pdf_type = "image"
+        confidence = 0.85
+    else:
+        pdf_type = "unknown"
+        confidence = 0.0
 
-    if image_count > 0:
-        return {"pdf_type": "image", "confidence": 0.8}
-
-    return {"pdf_type": "unknown", "confidence": 0.0}
+    return {
+        "pdf_type": pdf_type,
+        "confidence": confidence,
+        "pages": pages_info,
+        "metadata": {
+            "page_count": len(doc),
+            "is_scanned": total_vector == 0 and total_image > 0
+        }
+    }
