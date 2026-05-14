@@ -20,10 +20,17 @@ class Room:
 
 
 @dataclass
+class Wall:
+    id: int
+    p1: Tuple[int, int]
+    p2: Tuple[int, int]
+
+@dataclass
 class RoomResult:
     width: int
     height: int
     rooms: List[Room]
+    walls: List[Wall]
     debug: Dict[str, str]
 
 
@@ -289,7 +296,12 @@ def detect_rooms_from_walls(
 
         debug.update({"wallmask": wall_path, "outside": out_path, "inside": in_path, "rooms": rooms_path})
 
-    return RoomResult(width=width, height=height, rooms=rooms, debug=debug)
+    # 9) Wrap walls for result
+    walls_list = []
+    for i, w in enumerate(walls_lines):
+        walls_list.append(Wall(id=i, p1=(w["x1"], w["y1"]), p2=(w["x2"], w["y2"])))
+
+    return RoomResult(width=width, height=height, rooms=rooms, walls=walls_list, debug=debug)
 
 
 # ================================================================

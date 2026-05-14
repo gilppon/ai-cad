@@ -42,12 +42,21 @@ class Wall:
     kind: str = "STRUCTURAL" # STRUCTURAL, PARTITION, etc.
 
 @dataclass
+class Floor:
+    level: int  # 0 for GF, 1 for 2F, etc.
+    name: str
+    rooms: List[Room] = field(default_factory=list)
+    walls: List[Wall] = field(default_factory=list)
+    elevation_mm: float = 0.0
+    height_mm: float = 3000.0
+
+@dataclass
 class LeakCase:
     case_id: str
     customer_name: Optional[str] = None
     address: Optional[str] = None
     incident_date: Optional[str] = None
     description: Optional[str] = None
-    rooms: List[Room] = field(default_factory=list)
-    walls: List[Wall] = field(default_factory=list)
+    floors: List[Floor] = field(default_factory=list)
     damage_zones: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)

@@ -28,7 +28,8 @@ def detect_pdf_type(pdf_path):
         })
 
     # Classification logic
-    if total_vector > 50 and total_text_len > 100:
+    # Lowered threshold: many vector PDFs might have fewer than 50 lines but are still vector
+    if total_vector > 10:
         pdf_type = "vector"
         confidence = 0.95
     elif total_image > 0:
@@ -47,3 +48,12 @@ def detect_pdf_type(pdf_path):
             "is_scanned": total_vector == 0 and total_image > 0
         }
     }
+
+if __name__ == "__main__":
+    import sys
+    import json
+    if len(sys.argv) > 1:
+        result = detect_pdf_type(sys.argv[1])
+        print(json.dumps(result, indent=2))
+    else:
+        print("Usage: python parser/pdf_type.py <pdf_path>")

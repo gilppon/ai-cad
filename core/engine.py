@@ -9,6 +9,8 @@ from domain.models import LeakCase
 from pipeline.contracts import validate_geometry_payload, validate_export_metadata
 from pipeline.paths import resolve_output_path, resolve_project_path
 from harness.circuit_breaker import circuit_breaker
+import fitz
+from parser.text_extract import extract_text_from_page, find_room_height
 
 class PipelineEngine:
     """
@@ -21,71 +23,135 @@ class PipelineEngine:
         os.makedirs(self.output_dir, exist_ok=True)
 
     @circuit_breaker(failure_threshold=3, recovery_timeout=60)
-    def process_pdf(self, pdf_path: str, page_index: int = 0) -> Dict[str, Any]:
+    def process_document(self, pdf_path: str) -> Dict[str, Any]:
         """
-        Full pipeline: PDF -> Type Detection -> Extraction (Image/Vector) -> IFC
+        Processes a multi-page PDF and aggregates all floors into a single IFC.
         """
-        print(f"[*] Processing PDF: {pdf_path} (Page: {page_index})")
-        
-        # 0. Detection
+        print(f"[*] Starting multi-page processing: {pdf_path}")
         from parser.pdf_type import detect_pdf_type
         pdf_info = detect_pdf_type(pdf_path)
-        pdf_type = pdf_info.get("pdf_type", "image")
-        print(f"[*] Detected PDF type: {pdf_type} (conf: {pdf_info.get('confidence')})")
-
-        rooms_json_name = f"page{page_index}_rooms.json"
-        rooms_json_path = os.path.join(self.output_dir, rooms_json_name)
-
-        if pdf_type == "vector":
-            # 1. Vector Extraction
-            from parser.pdf_vector import extract_vector_geometry
-            rooms_payload = extract_vector_geometry(pdf_path, page_index=page_index)
-            
-            with open(rooms_json_path, "w", encoding="utf-8") as f:
-                json.dump(rooms_payload, f, indent=2)
-            print(f"[*] Saved vector geometry to {rooms_json_path}")
-        else:
-            # 1. Image-based Room Detection
-            try:
-                from parser.room_detect import detect_rooms
-                room_result = detect_rooms(pdf_path, page=page_index)
-            except Exception as e:
-                print(f"[!] room_detect failed: {e}. Using dummy.")
-                room_result = self._get_dummy_room_result()
-
-            # 2. Export Geometry JSON
-            from parser.room_export import save_rooms_json
-            save_rooms_json(
-                room_result,
-                rooms_json_path,
-                page=page_index,
-                pixel_to_mm=5.0 
-            )
-            
-            with open(rooms_json_path, "r", encoding="utf-8") as f:
-                rooms_payload = json.load(f)
+        page_count = pdf_info["metadata"]["page_count"]
+        pdf_type = pdf_info["pdf_type"]
         
-        validate_geometry_payload(rooms_payload)
+        all_floor_payloads = []
+        
+        for i in range(page_count):
+            print(f"[*] --- Processing Page {i+1}/{page_count} ---")
+            payload = self._extract_page_geometry(pdf_path, i, pdf_type)
+            if payload:
+                all_floor_payloads.append(payload)
+        
+        if not all_floor_payloads:
+            return {"status": "error", "message": "No geometry extracted from any page."}
 
-        # 3. IFC Export
-        from parser.export_ifc import build_ifc_from_meta
-        ifc_name = f"page{page_index}_result.ifc"
-        ifc_meta_name = f"page{page_index}_result.ifc.meta.json"
+        # 3. Aggregated IFC Export
+        from parser.export_ifc import build_ifc_from_multi_floor
+        ifc_name = "full_project.ifc"
         ifc_path = os.path.join(self.output_dir, ifc_name)
-        ifc_meta_path = os.path.join(self.output_dir, ifc_meta_name)
         
-        # IFC export currently expects a 'scene_export_metadata' kind, 
-        # but build_ifc_from_meta is flexible. 
-        # We might need to adapt it if it strictly expects wall/door lists.
-        build_ifc_from_meta(rooms_payload, out_ifc=ifc_path, out_meta=ifc_meta_path)
+        build_ifc_from_multi_floor(all_floor_payloads, out_ifc=ifc_path)
 
         return {
             "status": "success",
             "project_id": self.project_id,
+            "page_count": page_count,
             "artifacts": {
-                "rooms_json": rooms_json_path,
+                "ifc": ifc_path
+            }
+        }
+
+    def _extract_page_geometry(self, pdf_path: str, page_index: int, pdf_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Extracts geometry payload for a single page.
+        """
+        rooms_json_name = f"page{page_index}_rooms.json"
+        rooms_json_path = os.path.join(self.output_dir, rooms_json_name)
+
+        if pdf_type == "vector" or pdf_type == "auto":
+             # If pdf_type is auto, we re-detect for the page or assume it's detected already
+             if pdf_type == "auto":
+                 from parser.pdf_type import detect_pdf_type
+                 pdf_info = detect_pdf_type(pdf_path)
+                 pdf_type = pdf_info["pdf_type"]
+
+        if pdf_type == "vector":
+            from parser.pdf_vector import extract_vector_geometry
+            payload = extract_vector_geometry(pdf_path, page_index=page_index)
+        else:
+            try:
+                from parser.room_detect import detect_rooms
+                room_result = detect_rooms(pdf_path, page=page_index)
+                from parser.room_export import save_rooms_json
+                save_rooms_json(room_result, rooms_json_path, page=page_index, pixel_to_mm=5.0)
+                with open(rooms_json_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception as e:
+                print(f"[!] Error on page {page_index}: {e}")
+                return None
+
+        validate_geometry_payload(payload)
+        
+        # Structure Integrity Check
+        from harness.structure import validate_structure
+        if not validate_structure(payload):
+            print(f"[!] Structural validation failed for page {page_index}")
+            # We could raise an error or just flag it in metadata
+            payload["metadata"] = payload.get("metadata", {})
+            payload["metadata"]["integrity_warning"] = True
+
+        # 4. PDF Text Extraction (for room heights/labels)
+        try:
+            doc = fitz.open(pdf_path)
+            page = doc[page_index]
+            text_blocks = extract_text_from_page(page)
+            
+            # Rendering scale check (2.0 for image-based, 1.0 for vector)
+            text_scale = 2.0 if pdf_type != "vector" else 1.0
+            
+            detected_heights = []
+            for room in payload.get("rooms", []):
+                poly = room.get("polygon", [])
+                height = find_room_height(text_blocks, poly, scale=text_scale)
+                if height:
+                    room["metadata"] = room.get("metadata", {})
+                    room["metadata"]["height"] = height
+                    detected_heights.append(height)
+            
+            # If heights were detected, set a floor-level default
+            if detected_heights:
+                avg_height = sum(detected_heights) / len(detected_heights)
+                payload["metadata"] = payload.get("metadata", {})
+                payload["metadata"]["floor_height_mm"] = avg_height
+                print(f"[*] Detected floor height: {avg_height}mm (from {len(detected_heights)} rooms)")
+            
+            doc.close()
+        except Exception as te:
+            print(f"[!] Text extraction failed for page {page_index}: {te}")
+
+        # Save cache
+        with open(rooms_json_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+            
+        return payload
+
+    def process_pdf(self, pdf_path: str, page_index: int = 0) -> Dict[str, Any]:
+        """
+        Legacy support for single page processing.
+        """
+        payload = self._extract_page_geometry(pdf_path, page_index, "auto")
+        if not payload:
+            return {"status": "error"}
+            
+        from parser.export_ifc import build_ifc_from_meta
+        ifc_path = os.path.join(self.output_dir, f"page{page_index}_result.ifc")
+        build_ifc_from_meta(payload, out_ifc=ifc_path, out_meta=ifc_path + ".meta.json")
+        
+        rooms_json_path = os.path.join(self.output_dir, f"page{page_index}_rooms.json")
+        return {
+            "status": "success", 
+            "artifacts": {
                 "ifc": ifc_path,
-                "ifc_meta": ifc_meta_path
+                "rooms_json": rooms_json_path
             }
         }
 

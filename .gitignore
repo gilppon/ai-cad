@@ -165,3 +165,8 @@ samples/
 *.png
 .gemini/
 .cursor/
+
+# Web Project
+web/node_modules/
+web/dist/
+web/.env*

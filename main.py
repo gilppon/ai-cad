@@ -1,33 +1,28 @@
 import sys
-from parser.pdf_type import detect_pdf_type
-from parser.image_outline import extract_outlines_from_image_pdf
+import os
+from core.engine import PipelineEngine
 
 def main(pdf_path: str):
-    info = detect_pdf_type(pdf_path)
-    print("PDF TYPE:", info)
-
-    if info.get("pdf_type") != "image":
-        print("❌ Only image PDF pipeline is wired right now.")
+    if not os.path.exists(pdf_path):
+        print(f"[!] File not found: {pdf_path}")
         return
 
-    print("✅ Supported PDF (image) - extracting outlines (OpenCV)...")
-
-    report = extract_outlines_from_image_pdf(
-        pdf_path,
-        out_dir="out",
-        page_limit=1,
-    )
-
-    # image_outline.py 리턴 구조: {"pdf_type": "image", "pages": [...]}
-    r0 = report["pages"][0]
-
-    print("counts:", r0.get("counts"))
-    print("Saved:")
-    files = r0.get("files", {})
-    for k in ["rendered", "edges", "overlay"]:
-        v = files.get(k)
-        if v:
-            print(" -", v)
+    print(f"[*] Starting CAD SaaS MVP Pipeline for: {pdf_path}")
+    
+    # Initialize Engine
+    project_id = os.path.basename(pdf_path).split('.')[0]
+    engine = PipelineEngine(project_id=project_id)
+    
+    # Process
+    result = engine.process_document(pdf_path)
+    
+    if result["status"] == "success":
+        print("\n[+] Processing Complete!")
+        print(f"[*] Project ID: {result['project_id']}")
+        print(f"[*] Pages Processed: {result['page_count']}")
+        print(f"[*] IFC Exported to: {result['artifacts']['ifc']}")
+    else:
+        print(f"\n[!] Processing Failed: {result.get('message')}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

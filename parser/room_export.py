@@ -80,6 +80,7 @@ def rooms_to_json_dict(
     w = int(getattr(room_result, "width", 0))
     h = int(getattr(room_result, "height", 0))
     rooms_data = getattr(room_result, "rooms", []) or []
+    walls_data = getattr(room_result, "walls", []) or []
     debug = getattr(room_result, "debug", {}) or {}
 
     out_rooms: List[Dict[str, Any]] = []
@@ -100,6 +101,13 @@ def rooms_to_json_dict(
         
         # Convert to domain Points
         poly_points = [Point(x=float(p[0]), y=float(p[1])) for p in contour]
+        
+        # Room classification fallback
+        if kind == RoomKind.UNKNOWN:
+            from .room_semantics import classify_room
+            # convert poly_points to dict list for classify_room
+            poly_dicts = [{"x": p.x, "y": p.y} for p in poly_points]
+            kind = classify_room(poly_dicts, pixel_to_mm or 5.0)
         
         area_px = _safe_float(getattr(r, "area_px", _poly_area(poly_points)))
         
@@ -130,10 +138,19 @@ def rooms_to_json_dict(
 
     processing = build_processing_metadata("room_export")
 
+    out_walls: List[Dict[str, Any]] = []
+    for wall_obj in walls_data:
+        out_walls.append({
+            "id": getattr(wall_obj, "id", 0),
+            "p1": {"x": float(wall_obj.p1[0]), "y": float(wall_obj.p1[1])},
+            "p2": {"x": float(wall_obj.p2[0]), "y": float(wall_obj.p2[1])},
+        })
+
     return build_geometry_payload(
         page=page,
         canvas={"width": w, "height": h},
         rooms=out_rooms,
+        walls=out_walls,
         debug_files=debug,
         scale=scale,
         source=source,
