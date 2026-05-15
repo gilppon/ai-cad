@@ -5,6 +5,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Upload from './pages/Upload';
 import Landing from './pages/Landing';
+import Editor from './pages/Editor';
+import Report from './pages/Report';
 
 function App() {
   const { user, setUser } = useAuthStore();
@@ -57,6 +59,8 @@ function App() {
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
         <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />
         <Route path="/upload" element={user ? <Upload /> : <Navigate to="/login" />} />
+        <Route path="/editor/:projectId" element={user ? <Editor /> : <Navigate to="/login" />} />
+        <Route path="/report/:projectId" element={user ? <Report /> : <Navigate to="/login" />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </Router>

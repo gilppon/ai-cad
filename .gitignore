@@ -160,8 +160,9 @@ cython_debug/
 out/
 scratch/
 samples/
+vector_store/
 *.ifc
-*.json
+artifacts/
 *.png
 .gemini/
 .cursor/

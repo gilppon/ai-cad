@@ -126,14 +126,20 @@ export default function Dashboard() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     {project.status === 'completed' && project.ifc_url && (
-                      <a 
-                        href={`http://localhost:8000/api/v1/download/${project.ifc_url}`} 
-                        className="text-blue-600 hover:text-blue-900 flex items-center justify-end gap-1"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <Download size={16} /> Download IFC
-                      </a>
+                      <div className="flex items-center justify-end gap-3">
+                        <Link
+                          to={`/editor/${project.id}`}
+                          className="text-emerald-600 hover:text-emerald-900 flex items-center gap-1"
+                        >
+                          Edit Data
+                        </Link>
+                        <Link
+                          to={`/report/${project.id}`}
+                          className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
+                        >
+                          <FileText size={16} /> View Report
+                        </Link>
+                      </div>
                     )}
                   </td>
                 </tr>

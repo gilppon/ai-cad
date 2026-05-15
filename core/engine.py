@@ -51,12 +51,17 @@ class PipelineEngine:
         
         build_ifc_from_multi_floor(all_floor_payloads, out_ifc=ifc_path)
 
+        comp_path = os.path.join(self.output_dir, "page0_compliance.json")
+        rooms_json_path = os.path.join(self.output_dir, "page0_rooms.json")
+        
         return {
             "status": "success",
             "project_id": self.project_id,
             "page_count": page_count,
             "artifacts": {
-                "ifc": ifc_path
+                "ifc": ifc_path,
+                "compliance": comp_path,
+                "rooms_json": rooms_json_path
             }
         }
 
@@ -128,6 +133,10 @@ class PipelineEngine:
         except Exception as te:
             print(f"[!] Text extraction failed for page {page_index}: {te}")
 
+        # --- Stage 2: Compliance Extraction ---
+        from compliance.extractor import extract_compliance_data
+        payload = extract_compliance_data(payload, self.output_dir, page_index)
+
         # Save cache
         with open(rooms_json_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
@@ -147,11 +156,13 @@ class PipelineEngine:
         build_ifc_from_meta(payload, out_ifc=ifc_path, out_meta=ifc_path + ".meta.json")
         
         rooms_json_path = os.path.join(self.output_dir, f"page{page_index}_rooms.json")
+        comp_path = os.path.join(self.output_dir, f"page{page_index}_compliance.json")
         return {
             "status": "success", 
             "artifacts": {
                 "ifc": ifc_path,
-                "rooms_json": rooms_json_path
+                "rooms_json": rooms_json_path,
+                "compliance": comp_path
             }
         }
 

@@ -4,6 +4,12 @@ from .models import (
     Room,
     RoomKind,
     Wall,
+    DamageType,
+    Severity,
+    LeakSource,
+    DamageZone,
+    SuspectedPath,
+    IncidentAnnotation,
 )
 
 __all__ = [
@@ -12,4 +18,10 @@ __all__ = [
     "Room",
     "RoomKind",
     "Wall",
+    "DamageType",
+    "Severity",
+    "LeakSource",
+    "DamageZone",
+    "SuspectedPath",
+    "IncidentAnnotation",
 ]

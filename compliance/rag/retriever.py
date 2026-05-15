@@ -1,0 +1,42 @@
+import chromadb
+from typing import List, Dict, Any
+from pathlib import Path
+
+DB_PATH = Path("e:/project/cad_saas_mvp/vector_store/chromadb")
+
+def retrieve_relevant_laws(query_text: str, n_results: int = 3) -> List[Dict[str, Any]]:
+    """
+    쿼리를 입력받아 ChromaDB에서 관련 법규 조항을 검색합니다.
+    """
+    if not DB_PATH.exists():
+        print(f"ChromaDB not found at {DB_PATH}")
+        return []
+        
+    client = chromadb.PersistentClient(path=str(DB_PATH))
+    collection_name = "japanese_building_laws"
+    
+    try:
+        collection = client.get_collection(name=collection_name)
+    except Exception:
+        print(f"Collection {collection_name} not found.")
+        return []
+
+    results = collection.query(
+        query_texts=[query_text],
+        n_results=n_results
+    )
+    
+    retrieved_laws = []
+    if results and results.get('documents') and len(results['documents']) > 0:
+        docs = results['documents'][0]
+        metas = results['metadatas'][0]
+        ids = results['ids'][0]
+        
+        for doc, meta, doc_id in zip(docs, metas, ids):
+            retrieved_laws.append({
+                "id": doc_id,
+                "title": meta.get("title", ""),
+                "content": doc
+            })
+            
+    return retrieved_laws
