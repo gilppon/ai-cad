@@ -135,7 +135,7 @@ class PipelineEngine:
 
         # --- Stage 2: Compliance Extraction ---
         from compliance.extractor import extract_compliance_data
-        payload = extract_compliance_data(payload, self.output_dir, page_index)
+        extract_compliance_data(payload, self.output_dir, page_index)
 
         # Save cache
         with open(rooms_json_path, "w", encoding="utf-8") as f:

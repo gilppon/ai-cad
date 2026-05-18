@@ -51,7 +51,8 @@ class LMStudioSLMAdapter:
         except Exception as e:
             print(f"SLM Adapter Error: {e}")
             return {
-                "summary": "SLM(로컬 LLM) 연결 또는 추론에 실패했습니다. LM Studio가 포트 1234에서 실행 중인지 확인하세요.",
+                "[SLM MOCK RESPONSE]": True,
+                "summary": "[SLM MOCK RESPONSE] SLM(로컬 LLM) 연결 또는 추론에 실패했습니다. LM Studio가 포트 1234에서 실행 중인지 확인하세요.",
                 "action_items": []
             }
 

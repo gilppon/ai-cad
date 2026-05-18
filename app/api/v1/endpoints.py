@@ -141,13 +141,13 @@ async def get_compliance_report(project_id: str, auth_data: dict = Depends(get_c
         compliance_data = json.load(f)
         
     from compliance.evaluator import evaluate_project
-    from compliance.slm_adapter import slm_adapter
+    from compliance.gemini_adapter import llm_adapter
     
     # 1. Deterministic Evaluation
     report = evaluate_project(compliance_data)
     
     # 2. SLM Mock Inference
-    slm_reasoning = slm_adapter.generate_compliance_reasoning(
+    slm_reasoning = llm_adapter.generate_compliance_reasoning(
         slm_prompt_context=report["slm_prompt_context"],
         geometry_data=compliance_data
     )

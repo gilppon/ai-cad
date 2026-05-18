@@ -33,9 +33,13 @@ def retrieve_relevant_laws(query_text: str, n_results: int = 3) -> List[Dict[str
         ids = results['ids'][0]
         
         for doc, meta, doc_id in zip(docs, metas, ids):
+            law_title = meta.get("law_title", "")
+            article_title = meta.get("article_title", "")
+            full_title = f"[{law_title}] {article_title}".strip() if law_title or article_title else doc_id
+            
             retrieved_laws.append({
                 "id": doc_id,
-                "title": meta.get("title", ""),
+                "title": full_title,
                 "content": doc
             })
             

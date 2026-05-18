@@ -1,6 +1,6 @@
 import json
 from compliance.evaluator import evaluate_project
-from compliance.slm_adapter import slm_adapter
+from compliance.gemini_adapter import llm_adapter
 
 def test_stage3_rule_engine():
     # Mock compliance data
@@ -74,8 +74,8 @@ def test_stage3_rule_engine():
     assert corr_res[1]["status"] == "PASS" # Ignored
     
     # SLM check
-    slm_reasoning = slm_adapter.generate_compliance_reasoning(report["slm_prompt_context"], compliance_data)
-    assert "[SLM MOCK RESPONSE]" in slm_reasoning
+    slm_reasoning = llm_adapter.generate_compliance_reasoning(report["slm_prompt_context"], compliance_data)
+    assert "[LLM MOCK RESPONSE]" in slm_reasoning or "[LLM MOCK RESPONSE]" in slm_reasoning.get("summary", "")
     
     print("test_stage3_rule_engine passed successfully!")
 
