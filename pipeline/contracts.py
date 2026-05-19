@@ -123,3 +123,51 @@ def validate_export_metadata(payload: Dict[str, Any]) -> None:
     params = payload.get("params")
     if not isinstance(params, dict):
         raise ContractValidationError("Export metadata params must be a dictionary.")
+
+
+def validate_incident_payload(incident: Dict[str, Any]) -> None:
+    """
+    incident 서브 페이로드의 구조 유효성 검증.
+    빈 dict는 허용 (인시던트 미첨부 상태).
+    """
+    if not isinstance(incident, dict):
+        raise ContractValidationError("Incident payload must be a dictionary.")
+
+    if not incident:
+        return  # 빈 인시던트는 합법
+
+    # case_id 필수
+    if "case_id" not in incident:
+        raise ContractValidationError("Incident payload must contain 'case_id'.")
+
+    # leak_sources 구조 검증
+    sources = incident.get("leak_sources", [])
+    if not isinstance(sources, list):
+        raise ContractValidationError("Incident leak_sources must be a list.")
+    for i, src in enumerate(sources):
+        if not isinstance(src, dict):
+            raise ContractValidationError(f"leak_sources[{i}] must be a dict.")
+        if "point" not in src:
+            raise ContractValidationError(f"leak_sources[{i}] must have 'point'.")
+
+    # damage_zones 구조 검증
+    zones = incident.get("damage_zones", [])
+    if not isinstance(zones, list):
+        raise ContractValidationError("Incident damage_zones must be a list.")
+    for i, dz in enumerate(zones):
+        if not isinstance(dz, dict):
+            raise ContractValidationError(f"damage_zones[{i}] must be a dict.")
+        for req_field in ("id", "damage_type", "severity"):
+            if req_field not in dz:
+                raise ContractValidationError(f"damage_zones[{i}] missing '{req_field}'.")
+
+    # suspected_paths 구조 검증
+    paths = incident.get("suspected_paths", [])
+    if not isinstance(paths, list):
+        raise ContractValidationError("Incident suspected_paths must be a list.")
+
+    # annotations 구조 검증
+    annotations = incident.get("annotations", [])
+    if not isinstance(annotations, list):
+        raise ContractValidationError("Incident annotations must be a list.")
+

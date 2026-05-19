@@ -166,6 +166,70 @@ class PipelineEngine:
             }
         }
 
+    def process_with_incident(
+        self,
+        pdf_path: str,
+        leak_case: "LeakCase",
+        page_index: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        PDF 처리 + LeakCase 인시던트 매핑 통합 파이프라인.
+
+        1. PDF → geometry payload 추출
+        2. LeakCase → geometry payload에 인시던트 합성
+        3. 인시던트 포함 IFC 생성
+        4. LeakCase JSON 저장
+
+        Args:
+            pdf_path: PDF 파일 경로
+            leak_case: 인시던트 데이터가 담긴 LeakCase 인스턴스
+            page_index: 처리할 페이지 번호
+
+        Returns:
+            결과 dict (status, artifacts, incident_warnings)
+        """
+        from scene.incident_mapper import map_incident_to_scene, validate_incident_mapping
+        from scene.serializer import save_leak_case
+        from pipeline.contracts import validate_incident_payload
+
+        # 1. 기하학 추출
+        payload = self._extract_page_geometry(pdf_path, page_index, "auto")
+        if not payload:
+            return {"status": "error", "message": "Geometry extraction failed"}
+
+        # 2. 인시던트 매핑
+        scene_payload = map_incident_to_scene(leak_case, payload)
+
+        # 3. 인시던트 검증
+        validate_incident_payload(scene_payload.get("incident", {}))
+        incident_warnings = validate_incident_mapping(scene_payload)
+
+        # 4. 인시던트 포함 geometry 저장
+        rooms_json_path = os.path.join(self.output_dir, f"page{page_index}_rooms.json")
+        with open(rooms_json_path, "w", encoding="utf-8") as f:
+            json.dump(scene_payload, f, indent=2)
+
+        # 5. IFC 생성 (인시던트 메타데이터 포함)
+        from parser.export_ifc import build_ifc_from_meta
+        ifc_path = os.path.join(self.output_dir, f"page{page_index}_result.ifc")
+        build_ifc_from_meta(scene_payload, out_ifc=ifc_path, out_meta=ifc_path + ".meta.json")
+
+        # 6. LeakCase 독립 JSON 저장
+        case_json_path = os.path.join(self.output_dir, f"incident_{leak_case.case_id}.json")
+        save_leak_case(leak_case, case_json_path)
+
+        comp_path = os.path.join(self.output_dir, f"page{page_index}_compliance.json")
+        return {
+            "status": "success",
+            "artifacts": {
+                "ifc": ifc_path,
+                "rooms_json": rooms_json_path,
+                "compliance": comp_path,
+                "incident_json": case_json_path,
+            },
+            "incident_warnings": incident_warnings,
+        }
+
     def _get_dummy_room_result(self) -> Any:
         class Dummy:
             width = 1000

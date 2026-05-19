@@ -139,8 +139,8 @@ def dedup_exact(lines: List[Line]) -> List[Line]:
 
 def merge_collinear_segments(
     lines: List[Line],
-    dist_tol: float = 3.0,
-    gap_tol: float = 15.0,
+    dist_tol: float = 5.0,  # Phase 3: Relaxed from 3.0
+    gap_tol: float = 25.0,  # Phase 3: Relaxed from 15.0
 ) -> List[Line]:
     """
     Merge collinear (axis-aligned) segments that overlap or have small gaps.
@@ -210,7 +210,7 @@ def merge_collinear_segments(
     return merged
 
 
-def snap_endpoints(lines: List[Line], snap_dist: float = 12.0) -> List[Line]:
+def snap_endpoints(lines: List[Line], snap_dist: float = 15.0) -> List[Line]:
     """
     Snap endpoints that are within snap_dist to the same coordinate (gridless).
     This helps line connectivity.
@@ -270,7 +270,7 @@ def snap_endpoints(lines: List[Line], snap_dist: float = 12.0) -> List[Line]:
     return out
 
 
-def merge_parallel_pairs(lines: List[Line], angle_tol: float = 2.0, dist_tol: float = 12.0) -> List[Line]:
+def merge_parallel_pairs(lines: List[Line], angle_tol: float = 2.0, dist_tol: float = 18.0) -> List[Line]:
     """
     In this MVP, after snap_to_axis_keep, angles are already 0/90.
     So this becomes a light cleanup: merge near-parallel duplicates by collapsing y/x within dist_tol.

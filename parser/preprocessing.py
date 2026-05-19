@@ -10,7 +10,8 @@ def denoise_image(image: np.ndarray) -> np.ndarray:
     denoised = cv2.medianBlur(image, 3)
     
     # Optional: Fast Non-Local Means Denoising for more thorough cleanup
-    # denoised = cv2.fastNlMeansDenoising(denoised, None, 10, 7, 21)
+    # Phase 3: Activated for robust OCR/Vision on noisy scans
+    denoised = cv2.fastNlMeansDenoising(denoised, None, 10, 7, 21)
     
     return denoised
 
@@ -54,7 +55,7 @@ def deskew_image(image: np.ndarray) -> Tuple[np.ndarray, float]:
     
     return rotated, float(median_angle)
 
-def preprocess_for_pipeline(image: np.ndarray) -> Dict[str, Any]:
+def preprocess_for_pipeline(image: np.ndarray, apply_morphology: bool = True) -> Dict[str, Any]:
     """
     Run the full preprocessing suite.
     """
@@ -71,10 +72,23 @@ def preprocess_for_pipeline(image: np.ndarray) -> Dict[str, Any]:
     denoised = denoise_image(deskewed)
     
     # 4. Adaptive Thresholding (Binarization)
+    # Phase 3: Dynamic block size based on image resolution
+    h, w = denoised.shape
+    block_size = 11 if max(h, w) < 2000 else 15
     binary = cv2.adaptiveThreshold(
-        denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+        denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 2
     )
     
+    # 5. Morphological Operations (Phase 3)
+    if apply_morphology:
+        # Remove small dot noise
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=1)
+        
+        # Connect broken lines
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+        
     return {
         "processed": binary,
         "deskew_angle": angle,

@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from enum import Enum
+from datetime import datetime, timezone
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 class RoomKind(Enum):
     LDK = "ldk"
@@ -93,6 +97,7 @@ class DamageZone:
     severity: Severity
     polygon: List[Point]
     room_id: Optional[int]
+    floor_level: int = 0
     surface_area_m2: float = 0.0
     description: str = ""
     photos: List[str] = field(default_factory=list)
@@ -111,6 +116,7 @@ class IncidentAnnotation:
     text: str
     category: str = "note"
     attached_photo: Optional[str] = None
+    created_at: str = ""
 
 @dataclass
 class LeakCase:
@@ -119,6 +125,9 @@ class LeakCase:
     address: Optional[str] = None
     incident_date: Optional[str] = None
     description: Optional[str] = None
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
     floors: List[Floor] = field(default_factory=list)
     leak_sources: List[LeakSource] = field(default_factory=list)
     damage_zones: List[DamageZone] = field(default_factory=list)
@@ -126,3 +135,14 @@ class LeakCase:
     annotations: List[IncidentAnnotation] = field(default_factory=list)
     compliance_checks: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = _now_iso()
+        if not self.updated_at:
+            self.updated_at = self.created_at
+
+    def bump_version(self):
+        """버전 증가 및 updated_at 갱신"""
+        self.version += 1
+        self.updated_at = _now_iso()
