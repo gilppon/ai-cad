@@ -184,9 +184,10 @@ class StripePaymentService:
             }
 
     @classmethod
-    def check_user_access_gate(cls, user_id: str, db: Any) -> bool:
+    def check_user_access_gate(cls, user_id: str, db: Any, amount: int = 1) -> bool:
         """
         유료 기능(PDF 레포트 다운로드 및 도면 3D 자동 변환) 가드 게이트웨이.
+        요구되는 최소 크레딧(amount)을 가지고 있는지 정밀 가드.
         Circuit Breaker가 OPEN일 시, 100% 무조건 PASS (Grace Period) 적용.
         """
         if cls._circuit_state == "OPEN":
@@ -203,7 +204,11 @@ class StripePaymentService:
             plan = profile.get("plan_type", "free")
             credits = profile.get("credits", 0) or 0
             
-            if plan in ["basic", "pro"] or credits > 0:
+            # Pro 플랜은 차감 및 가드 없는 완전 무제한 패스
+            if plan == "pro":
+                return True
+                
+            if credits >= amount:
                 return True
                 
             return False
@@ -213,9 +218,9 @@ class StripePaymentService:
             return True
             
     @classmethod
-    def deduct_credit(cls, user_id: str, db: Any) -> bool:
+    def deduct_credit(cls, user_id: str, db: Any, amount: int = 1) -> bool:
         """
-        단건 결제 시 크레딧 1 차감.
+        사용자 행동에 따라 가변적인 크레딧(amount) 차감.
         """
         if cls._circuit_state == "OPEN":
             return True
@@ -229,13 +234,13 @@ class StripePaymentService:
             plan = profile.get("plan_type", "free")
             credits = profile.get("credits", 0) or 0
             
-            # Pro 플랜은 차감 없음
+            # Pro 플랜은 차감하지 않음
             if plan == "pro":
                 return True
                 
-            if credits > 0:
+            if credits >= amount:
                 db.table("profiles").update({
-                    "credits": credits - 1,
+                    "credits": credits - amount,
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }).eq("id", user_id).execute()
                 return True

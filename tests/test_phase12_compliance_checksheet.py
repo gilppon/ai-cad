@@ -93,6 +93,46 @@ def test_compliance_checksheet_payment_guard():
     assert "Payment required" in res.json()["detail"]
 
 
+def test_compliance_checksheet_differentiated_payment_guard():
+    """크레딧이 10개 미만(예: 5크레딧)인 상태에서 format=pdf를 요청했을 때 402 에러로 차단되고, format=json일 때는 정상 패스되는지 정밀 검증"""
+    # 5 크레딧 유저로 설정
+    GLOBAL_MOCK_DB.table("profiles")._data = [
+        {"id": "user_123", "plan_type": "free", "credits": 5, "stripe_subscription_id": None}
+    ]
+    
+    # 1) format=pdf (10크레딧 필요) -> 402 차단되어야 함
+    res = client.get("/api/v1/projects/proj_999/compliance-checksheet?format=pdf")
+    assert res.status_code == 402
+    assert "10 credits required" in res.json()["detail"]
+    
+    # 2) format=json (1크레딧만 필요) -> 200 통과되어야 함 (조회는 차감 없음)
+    res_json = client.get("/api/v1/projects/proj_999/compliance-checksheet?format=json")
+    assert res_json.status_code == 200
+    
+    # DB 크레딧이 차감되지 않고 그대로 5개 유지되어 있는지 검증
+    profile = GLOBAL_MOCK_DB.table("profiles").select("*").eq("id", "user_123").execute().data[0]
+    assert profile["credits"] == 5
+
+
+def test_compliance_checksheet_credit_deduction():
+    """크레딧이 충분할 때(예: 15크레딧) format=pdf 요청 시 10크레딧이 정상 차감되어 5크레딧이 남는지 검증"""
+    # 15 크레딧 유저로 설정
+    GLOBAL_MOCK_DB.table("profiles")._data = [
+        {"id": "user_123", "plan_type": "free", "credits": 15, "stripe_subscription_id": None}
+    ]
+    
+    res = client.get(
+        "/api/v1/projects/proj_999/compliance-checksheet",
+        params={"format": "pdf", "chief_designer": "테스트", "license_number": "123"}
+    )
+    assert res.status_code == 200
+    
+    # 크레딧 10개 차감 확인
+    profile = GLOBAL_MOCK_DB.table("profiles").select("*").eq("id", "user_123").execute().data[0]
+    assert profile["credits"] == 5
+
+
+
 # ================================================================
 # 2. format=json 요청 시 Pydantic 데이터 계약 준수성 정밀 검증
 # ================================================================

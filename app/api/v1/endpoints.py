@@ -38,14 +38,14 @@ async def convert_pdf(
     db = auth_data["db"]
     
     # [하네스 프로토콜 - 결제 가드 및 회로 차단기]
-    if not StripePaymentService.check_user_access_gate(user_id, db):
+    if not StripePaymentService.check_user_access_gate(user_id, db, amount=3):
         raise HTTPException(
             status_code=402, 
-            detail="Payment required. Please purchase a plan or single ticket at /payments/checkout-session."
+            detail="Payment required. Please purchase a plan or single ticket at /payments/checkout-session to access 3D conversion. (3 credits required)"
         )
         
-    # 크레딧 1건 차감 시도
-    StripePaymentService.deduct_credit(user_id, db)
+    # 크레딧 3건 차감 시도
+    StripePaymentService.deduct_credit(user_id, db, amount=3)
     
     file_extension = os.path.splitext(file.filename)[1]
     
@@ -1075,11 +1075,18 @@ async def get_compliance_checksheet(
     db = auth_data["db"]
     
     # [하네스 프로토콜 - 결제 가드 및 회로 차단기]
-    if not StripePaymentService.check_user_access_gate(user_id, db):
+    # 단순 JSON 화면 조회 시에는 최소 1크레딧 기본 가드를 태우고,
+    # 실제 법적 효력을 가지는 PDF 다운로드 시에는 10 크레딧 차등 가드 및 실질 차감을 집행합니다!
+    required_amount = 10 if format == "pdf" else 1
+    if not StripePaymentService.check_user_access_gate(user_id, db, amount=required_amount):
         raise HTTPException(
             status_code=402, 
-            detail="Payment required. Please purchase a plan or single ticket at /payments/checkout-session to access compliance checksheets."
+            detail=f"Payment required. Please purchase a plan or single ticket at /payments/checkout-session to download checksheets. ({required_amount} credits required for format={format})"
         )
+        
+    # 정식 PDF 리포트 발행일 때만 실질적인 10 크레딧 차감 집행!
+    if format == "pdf":
+        StripePaymentService.deduct_credit(user_id, db, amount=10)
 
     # 프로젝트 정보 획득
     try:

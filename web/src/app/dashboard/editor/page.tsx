@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { 
   ArrowLeft, Save, MapPin, Layers, RefreshCw, 
-  HelpCircle, AlertTriangle, ShieldCheck, CheckCircle2, ChevronRight 
+  HelpCircle, AlertTriangle, ShieldCheck, CheckCircle2, ChevronRight,
+  Loader2
 } from "lucide-react";
 import ThreeDViewer from "@/components/ThreeDViewer";
 
@@ -43,7 +44,7 @@ interface DamageZone {
   room_id?: number;
 }
 
-export default function EditorPage() {
+function EditorContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const projectId = searchParams.get("project_id") || "mock_project_123";
@@ -464,5 +465,18 @@ export default function EditorPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function EditorPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#030306] text-blue-400">
+        <Loader2 className="w-10 h-10 animate-spin mb-4" />
+        <p className="font-mono text-xs tracking-widest">LOADING SECURE EDITOR WORKSPACE...</p>
+      </div>
+    }>
+      <EditorContent />
+    </Suspense>
   );
 }

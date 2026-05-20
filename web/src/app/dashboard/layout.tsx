@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { LayoutDashboard, FileUp, Settings, HelpCircle, Box } from "lucide-react";
 
@@ -21,18 +23,39 @@ export default function DashboardLayout({
             <LayoutDashboard className="w-5 h-5 mr-3" />
             Dashboard
           </Link>
-          <Link href="/dashboard/upload" className="flex items-center px-3 py-2.5 rounded-lg text-neutral-400 font-medium transition-colors hover:bg-neutral-800 hover:text-neutral-50">
+          <Link 
+            href="/dashboard" 
+            onClick={(e) => {
+              e.preventDefault();
+              alert("🇯🇵 [업로드 가이드]\n도면 업로드는 대시보드 중앙의 'Drag & Drop architectural PDF' 영역 또는 'Browse Files' 버튼을 이용해 주십시오!");
+            }}
+            className="flex items-center px-3 py-2.5 rounded-lg text-neutral-400 font-medium transition-colors hover:bg-neutral-800 hover:text-neutral-50"
+          >
             <FileUp className="w-5 h-5 mr-3" />
             Upload PDF
           </Link>
         </div>
 
         <div className="px-4 py-6 border-t border-neutral-800 space-y-2">
-          <Link href="/settings" className="flex items-center px-3 py-2.5 rounded-lg text-neutral-400 font-medium transition-colors hover:bg-neutral-800 hover:text-neutral-50">
+          <Link 
+            href="/dashboard" 
+            onClick={(e) => {
+              e.preventDefault();
+              alert("🔒 [기능 제한]\nSettings 메뉴는 상용 라이브 런칭(Enterprise Tier) 이후 활성화되는 본사 전용 관리 도구입니다.");
+            }}
+            className="flex items-center px-3 py-2.5 rounded-lg text-neutral-400 font-medium transition-colors hover:bg-neutral-800 hover:text-neutral-50"
+          >
             <Settings className="w-5 h-5 mr-3" />
             Settings
           </Link>
-          <Link href="/help" className="flex items-center px-3 py-2.5 rounded-lg text-neutral-400 font-medium transition-colors hover:bg-neutral-800 hover:text-neutral-50">
+          <Link 
+            href="/dashboard" 
+            onClick={(e) => {
+              e.preventDefault();
+              alert("ℹ️ [고객 지원]\nHelp & Support 채널은 상용 런칭 SOP 구축 이후 활성화될 예정입니다. 기술 문의는 코다리 개발본부로 직접 연락주십시오!");
+            }}
+            className="flex items-center px-3 py-2.5 rounded-lg text-neutral-400 font-medium transition-colors hover:bg-neutral-800 hover:text-neutral-50"
+          >
             <HelpCircle className="w-5 h-5 mr-3" />
             Help & Support
           </Link>
