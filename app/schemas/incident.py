@@ -81,3 +81,12 @@ class DamageSpreadResponse(BaseModel):
     affected_floor_levels: List[int]
     spread_summary: str
     per_room_damage: Dict[str, Any] = {}
+    
+
+class IncidentPinUpdateRequest(BaseModel):
+    pin_type: str = Field("leak_source", description="leak_source, damage_zone, 또는 annotation")
+    target_room_id: Optional[int] = None
+    coordinate: PointSchema
+    media_urls: List[str] = Field(default_factory=list, description="연결된 실사 이미지 CDN URL 목록")
+    comment: str = Field("", description="현장 추가 코멘트 및 상태 소견")
+

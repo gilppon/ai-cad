@@ -44,3 +44,19 @@ class CorrectionSessionResponse(BaseModel):
 class CorrectionHistoryResponse(BaseModel):
     sessions: List[Dict[str, Any]]
     stats: Dict[str, Any]
+
+
+class OfflineSyncRequest(BaseModel):
+    """오프라인 델타 벌크 동기화 요청"""
+    base_version: int = Field(..., description="The version of the project when the offline actions started")
+    operations: List[CorrectionOperation] = Field(..., description="The sequence of offline operations to apply")
+
+
+class OfflineSyncResponse(BaseModel):
+    """오프라인 델타 벌크 동기화 응답"""
+    status: str
+    session_id: str
+    current_version: int
+    patches_applied: int
+    operation_summary: Dict[str, int] = {}
+
