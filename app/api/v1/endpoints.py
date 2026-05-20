@@ -4,10 +4,22 @@ import shutil
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from app.schemas.tasks import TaskResponse, TaskStatus
+from app.schemas.correction import CorrectionBatchRequest
+from app.schemas.incident import (
+    IncidentCreateRequest,
+    IncidentResponse,
+    AnnotationCreateRequest,
+    AnnotationResponse,
+)
 from app.worker.tasks import process_pdf_task
 from celery.result import AsyncResult
 from fastapi import Depends
 from app.api.deps import get_current_user_and_db
+
+# Stripe 결제 및 다국어(i18n) 통합 모듈 임포트
+from app.services.payment import StripePaymentService, CircuitBreakerOpenException
+from app.schemas.payment import CheckoutSessionRequest, CheckoutSessionResponse, PaymentWebhookPayload, PaymentStatusResponse
+from app.services.i18n import JPTranslationEngine
 
 router = APIRouter()
 
@@ -23,6 +35,16 @@ async def convert_pdf(
     
     user_id = auth_data["user_id"]
     db = auth_data["db"]
+    
+    # [하네스 프로토콜 - 결제 가드 및 회로 차단기]
+    if not StripePaymentService.check_user_access_gate(user_id, db):
+        raise HTTPException(
+            status_code=402, 
+            detail="Payment required. Please purchase a plan or single ticket at /payments/checkout-session."
+        )
+        
+    # 크레딧 1건 차감 시도
+    StripePaymentService.deduct_credit(user_id, db)
     
     file_extension = os.path.splitext(file.filename)[1]
     
@@ -125,6 +147,7 @@ async def apply_corrections(
         payload = json.load(f)
 
     import uuid
+    from datetime import datetime, timezone
     from correction.patch import CorrectionSession
     from correction.operations import (
         change_room_type, move_wall, add_wall, delete_wall,
@@ -194,13 +217,43 @@ async def apply_corrections(
     project_dir = str(OUTPUT_ROOT / "projects" / project_id)
     payload = rebuild_after_correction(payload, session, output_dir=project_dir)
 
-    # DB 상태 업데이트
+    # 일본 건축 규정 및 공용/전유 누수 책임 판정 연동 (Phase 7)
+    from compliance.jp_compliance import JPResponsibilityEngine
+    compliance_opinions = []
+    
+    incident = payload.get("incident", {})
+    leak_sources = incident.get("leak_sources", [])
+    rooms = payload.get("rooms", [])
+    
+    for ls in leak_sources:
+        rid = ls.get("room_id")
+        target_room = next((r for r in rooms if r.get("id") == rid), None)
+        room_meta = target_room if target_room else {"id": rid, "kind": "UNKNOWN"}
+        
+        opinion = JPResponsibilityEngine.evaluate_leak(ls.get("point", {}), room_meta)
+        compliance_opinions.append(opinion)
+        ls["compliance_opinion"] = opinion
+        
+    incident["compliance_opinions"] = compliance_opinions
+    payload["incident"] = incident
+    
+    # 정합성을 위해 수정된 geom JSON 파일 저장
+    with open(geom_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    # DB 상태 업데이트 및 메타데이터 필드 보강 (하네스 방화벽 안전장치)
     ifc_path = payload.get("_rebuilt_ifc", "")
+    db_update = {
+        "status": "completed",
+        "metadata": {
+            "compliance_opinions": compliance_opinions,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+    }
     if ifc_path:
-        db.table("projects").update({
-            "status": "completed",
-            "ifc_url": ifc_path,
-        }).eq("id", project_id).execute()
+        db_update["ifc_url"] = ifc_path
+        
+    db.table("projects").update(db_update).eq("id", project_id).execute()
 
     return {
         "status": "success",
@@ -208,6 +261,7 @@ async def apply_corrections(
         "patches_applied": session.patch_count,
         "correction_source": session.correction_source,
         "operation_summary": session.operation_summary,
+        "compliance_opinions": compliance_opinions,
     }
 
 
@@ -592,4 +646,187 @@ async def delete_annotation(
 
     save_leak_case(case, path)
     return {"status": "success", "message": f"Annotation {annotation_id} deleted", "version": case.version}
+
+
+@router.get("/projects/{project_id}/pdf-report")
+async def get_pdf_report(
+    project_id: str,
+    auth_data: dict = Depends(get_current_user_and_db),
+):
+    """
+    일본 소기업 대상 'A4 1장 표준 누수 진단 보고서' PDF 생성 및 다운로드 API
+    """
+    db = auth_data["db"]
+    user_id = auth_data["user_id"]
+    
+    # [하네스 프로토콜 - 결제 가드 및 회로 차단기]
+    if not StripePaymentService.check_user_access_gate(user_id, db):
+        raise HTTPException(
+            status_code=402, 
+            detail="Payment required. Please purchase a plan or single ticket at /payments/checkout-session to download PDF reports."
+        )
+
+    res = db.table("projects").select("*").eq("id", project_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = res.data[0]
+    metadata = project.get("metadata", {}) or {}
+    raw_opinions = metadata.get("compliance_opinions", [])
+    
+    # [다국어 i18n 통합] 방 명칭 및 의견서 내의 영문 방 명칭을 일본 표준 명칭으로 자동 매핑 보완
+    compliance_opinions = []
+    for op in raw_opinions:
+        room_kind = op.get("room_type_jp", "用途不明")
+        translated_room = JPTranslationEngine.translate_room(room_kind)
+        
+        op_copy = dict(op)
+        op_copy["room_type_jp"] = translated_room["name"]
+        op_copy["room_abbr_jp"] = translated_room["abbr"]
+        compliance_opinions.append(op_copy)
+
+    from pipeline.paths import OUTPUT_ROOT
+    from exporter.pdf_generator import JPPDFGenerator
+
+    project_dir = OUTPUT_ROOT / "projects" / project_id
+    
+    project_name = project.get("original_filename", f"Project_{project_id}")
+    address = "東京都千代田区麹町" # 현장 진단 기본 템플릿
+    inspector_name = "漏水診断エキスパート"
+
+    # 만약 incident 데이터가 있다면 정보 획득
+    incident_path = project_dir / "incident.json"
+    if incident_path.exists():
+        try:
+            with open(incident_path, "r", encoding="utf-8") as f:
+                inc_data = json.load(f)
+                project_name = inc_data.get("customer_name", project_name)
+                address = inc_data.get("address", address)
+        except Exception:
+            pass
+
+    # 2D & 3D 이미지 경로 매핑
+    image_2d = str(project_dir / "page0_rooms.png")
+    if not os.path.exists(image_2d):
+        image_2d = "test_original.png" # Fallback static
+
+    image_3d = str(project_dir / "page0_3d.png")
+    if not os.path.exists(image_3d):
+        image_3d = "test_deskewed.png" # Fallback static
+
+    output_pdf = str(project_dir / "page0_compliance_report.pdf")
+
+    try:
+        pdf_path = JPPDFGenerator.generate_report(
+            project_id=project_id,
+            project_name=project_name,
+            address=address,
+            inspector_name=inspector_name,
+            compliance_opinions=compliance_opinions,
+            image_2d_path=image_2d,
+            image_3d_path=image_3d,
+            output_pdf_path=output_pdf
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
+
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=500, detail="Generated PDF not found on server")
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"leak_report_{project_id}.pdf"
+    )
+
+
+# ================================================================
+# Stripe Japan 결제 & i18n 통합 라우트 (Phase 9)
+# ================================================================
+
+@router.post("/payments/checkout-session", response_model=CheckoutSessionResponse)
+async def create_checkout_session(
+    request: CheckoutSessionRequest,
+    auth_data: dict = Depends(get_current_user_and_db)
+):
+    """
+    엔화(JPY) 결제를 위한 Stripe Checkout Session 생성 API
+    """
+    user_id = auth_data["user_id"]
+    db = auth_data["db"]
+    
+    try:
+        session_info = StripePaymentService.create_checkout_session(
+            user_id=user_id,
+            plan_type=request.plan_type,
+            db=db
+        )
+        return CheckoutSessionResponse(**session_info)
+    except CircuitBreakerOpenException as e:
+        # Circuit Breaker 작동 시 가용성 확보를 위해 바로 Grace Period 세션 반환
+        import uuid
+        return CheckoutSessionResponse(
+            session_id=f"cs_grace_{uuid.uuid4().hex[:12]}",
+            checkout_url="https://leak3d.japanbuild.com/payment/grace-bypass",
+            mode="circuit_breaker_bypass",
+            plan=request.plan_type,
+            amount=0
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Checkout creation failed: {str(e)}")
+
+
+@router.post("/payments/webhook")
+async def payment_webhook(
+    payload: PaymentWebhookPayload,
+    auth_data: dict = Depends(get_current_user_and_db)
+):
+    """
+    Stripe 결제 성공 콜백/웹훅 모사 처리 API
+    """
+    db = auth_data["db"]
+    
+    result = StripePaymentService.verify_and_apply_webhook(
+        payload=payload.model_dump(),
+        db=db
+    )
+    
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message"))
+        
+    return result
+
+
+@router.get("/payments/status", response_model=PaymentStatusResponse)
+async def get_payment_status(
+    auth_data: dict = Depends(get_current_user_and_db)
+):
+    """
+    현재 사용자의 결제 요금제 정보 및 잔여 크레딧 현황을 조회하는 API
+    """
+    user_id = auth_data["user_id"]
+    db = auth_data["db"]
+    
+    plan_type = "free"
+    credits = 0
+    
+    try:
+        res = db.table("profiles").select("plan_type, credits").eq("id", user_id).execute()
+        if res.data:
+            plan_type = res.data[0].get("plan_type", "free") or "free"
+            credits = res.data[0].get("credits", 0) or 0
+    except Exception:
+        # DB 테이블 부재 시 Fallback
+        pass
+        
+    active = StripePaymentService.check_user_access_gate(user_id, db)
+    circuit = StripePaymentService._circuit_state
+    
+    return PaymentStatusResponse(
+        plan_type=plan_type,
+        credits=credits,
+        active=active,
+        circuit_state=circuit
+    )
+
 

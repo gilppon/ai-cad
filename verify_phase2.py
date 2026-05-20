@@ -1,9 +1,25 @@
 import os
 import time
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
 from app.worker.tasks import process_pdf_task
+from app.api.deps import get_current_user_and_db
+
+# Mock Supabase Database Client
+mock_db = MagicMock()
+mock_table = MagicMock()
+mock_db.table.return_value = mock_table
+# Mock insert/update responses
+mock_table.insert.return_value.execute.return_value.data = [{"id": "mock_project_123"}]
+mock_table.update.return_value.eq.return_value.execute.return_value.data = [{"id": "mock_project_123"}]
+mock_table.select.return_value.eq.return_value.execute.return_value.data = [{"id": "mock_project_123"}]
+
+# Apply Dependency Overrides for Testing
+app.dependency_overrides[get_current_user_and_db] = lambda: {
+    "user_id": "mock-user-123",
+    "db": mock_db
+}
 
 # Create test client
 client = TestClient(app)

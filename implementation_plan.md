@@ -1,568 +1,204 @@
-# Implementation Plan
-
-## 1. Project Definition
-
-This project is not a generic floor-plan converter.
-It is a pipeline for converting Japanese incident-site floor plans into simple 3D explanatory models for leakage and defect communication.
-
-Primary product goal:
-
-- Ingest a floor plan or scanned drawing.
-- Recover enough spatial structure to explain the incident.
-- Attach leakage and damage semantics to the scene.
-- Produce customer-facing 3D views and packaged outputs.
-
-Non-goals for the current phase:
-
-- Full BIM authoring
-- Construction-grade geometric precision
-- Fully automatic, no-human-review processing
-
-## 2. Current State
-
-The current codebase already covers part of the geometry pipeline:
-
-- PDF/image floor-plan ingestion
-- Wall extraction
-- Room detection and refinement
-- STEP export
-- IFC export
-
-Main gaps:
-
-- No domain model for leakage incidents
-- No manual correction workflow
-- No presentation-oriented 3D annotation layer
-- Weak handling for real-world Japanese field drawings
-- No end-to-end product workflow for customer explanation
-
-## 3. Delivery Strategy
-
-The upgrade should be executed in three product stages:
-
-1. Stabilize the geometry pipeline
-2. Add incident semantics and correction workflow
-3. Build presentation and delivery outputs
-
-This plan assumes incremental delivery with verification at every step.
-
-## 4. Phase Breakdown
-
-### Phase 1. Domain and Data Contract Stabilization
-
-Goal:
-Define the system around incident explanation, not just geometry extraction.
-
-Target outcomes:
-
-- Standardized typed payloads between pipeline stages
-- Incident-centered metadata model
-- Clear separation between geometry, incident data, and exports
-
-Implementation tasks:
-
-1. Create a new `domain/` package.
-2. Add models for:
-   - `LeakCase`
-   - `FloorPlanAsset`
-   - `DamageZone`
-   - `InspectionNote`
-   - `SceneAnnotation`
-3. Add a shared pipeline payload schema:
-   - `IngestPayload`
-   - `GeometryPayload`
-   - `ScenePayload`
-   - `ExportPayload`
-4. Refactor `out/result.meta.json` generation to include incident metadata and processing metadata separately.
-5. Normalize coordinates, units, and identifiers across parser/export steps.
-
-Suggested file additions:
-
-- `domain/models.py`
-- `domain/schemas.py`
-- `pipeline/contracts.py`
-
-Suggested refactor targets:
-
-- `parser/room_export.py`
-- `parser/export_step.py`
-- `parser/export_ifc.py`
-
-Validation:
-
-- Schema validation tests for 3 sample incident cases
-- Stable JSON snapshots for intermediate payloads
-
-Exit criteria:
-
-- Every major step reads and writes a documented payload shape
-- Incident metadata can flow from input to final export metadata
-
-### Phase 2. Ingestion and Drawing-Type Routing
-
-Goal:
-Make the intake path robust for real Japanese field drawings.
-
-Target outcomes:
-
-- Better routing between vector PDF and image PDF
-- Better preprocessing for noisy scans
-- Deterministic intake diagnostics
-
-Implementation tasks:
-
-1. Upgrade PDF classification:
-   - vector-first
-   - image-first
-   - hybrid
-2. Add preprocessing for image plans:
-   - deskew
-   - denoise
-   - contrast normalization
-   - border cleanup
-3. Add ingest diagnostics:
-   - source type
-   - page size
-   - detected rotation
-   - rasterization scale
-   - confidence
-4. Persist ingest debug artifacts under a structured naming rule.
-
-Suggested refactor targets:
-
-- `parser/pdf_type.py`
-- `parser/pdf_vector.py`
-- `parser/image_outline.py`
-
-Validation:
-
-- 10 representative Japanese plan samples
-- Classification accuracy by document type
-- Reduced wall extraction failure on skewed scans
-
-Exit criteria:
-
-- Intake stage produces a reliable routing decision and debug report
-
-### Phase 3. Geometry Extraction Hardening
-
-Goal:
-Raise the stability of wall, room, and opening extraction.
-
-Target outcomes:
-
-- More reliable wall graph
-- Reduced false room splits/merges
-- Better door/opening inference
-
-Implementation tasks:
-
-1. Harden line extraction and merge rules.
-2. Add confidence scoring to walls and openings.
-3. Improve wall fill and boundary closure.
-4. Reduce over-reliance on axis-aligned assumptions where possible.
-5. Distinguish:
-   - structural wall candidate
-   - partition candidate
-   - uncertain line
-6. Separate door inference from export logic and move it into geometry refinement.
-
-Suggested refactor targets:
-
-- `parser/line_refine.py`
-- `parser/wall_fill.py`
-- `parser/room_detect.py`
-- `parser/rooms_pipeline.py`
-- `parser/export_step.py`
-
-Validation:
-
-- Regression set with expected walls/rooms JSON
-- Per-sample review of false positives and false negatives
-
-Exit criteria:
-
-- Door and room inference no longer depend on exporter-side fallback logic
-
-### Phase 4. Space Semantics and Japanese Layout Heuristics
-
-Goal:
-Turn extracted polygons into meaningful explanatory spaces.
-
-Target outcomes:
-
-- Better room-type classification
-- Adjacency graph useful for leakage explanation
-- Explicit handling of wet-area spaces
-
-Implementation tasks:
-
-1. Expand room categories:
-   - `ldk`
-   - `bedroom`
-   - `corridor`
-   - `bathroom`
-   - `toilet`
-   - `kitchen`
-   - `balcony`
-   - `shaft`
-   - `closet`
-   - `unknown`
-2. Add adjacency graph outputs:
-   - room-to-room
-   - room-to-opening
-   - wet-area proximity
-3. Add uncertainty labels for ambiguous room types.
-4. Preserve a distinction between inferred semantics and verified semantics.
-
-Suggested refactor targets:
-
-- `parser/room_detect.py`
-- `parser/rooms_pipeline.py`
-
-Validation:
-
-- Manual review on labeled samples
-- Confusion matrix for room-type inference
-
-Exit criteria:
-
-- Output scene has interpretable spaces relevant to leakage communication
-
-### Phase 5. Incident Semantics Layer
-
-Goal:
-Represent leakage incidents directly in the model.
-
-Target outcomes:
-
-- Leakage source markers
-- Damage areas by surface type
-- Explanation-ready incident overlays
-
-Implementation tasks:
-
-1. Add incident entities to scene payload:
-   - source point
-   - suspected path
-   - damaged surfaces
-   - severity
-   - note anchors
-2. Add support for:
-   - ceiling damage
-   - wall damage
-   - floor damage
-   - multi-room spread
-3. Link site photos and notes to scene coordinates or room ids.
-4. Keep all incident annotations editable and versioned.
-
-Suggested file additions:
-
-- `scene/incident_mapper.py`
-- `scene/annotations.py`
-
-Validation:
-
-- Synthetic incident cases mapped onto sample plans
-- JSON round-trip with annotations preserved
-
-Exit criteria:
-
-- A leakage case can be described inside the scene model, not just next to it
-
-### Phase 6. Manual Correction Workflow
-
-Goal:
-Accept that auto-detection will fail and design for efficient correction.
-
-Target outcomes:
-
-- Human-correctable extraction
-- Faster operational turnaround
-- Trustworthy customer outputs
-
-Implementation tasks:
-
-1. Add a correction editor MVP:
-   - edit wall segments
-   - merge/split rooms
-   - move openings
-   - place leak source
-   - paint damage zones
-2. Save corrections as delta data, not destructive overwrite.
-3. Re-run downstream scene build after correction.
-4. Track auto vs human-corrected state.
-
-Suggested architecture:
-
-- `review/` or `editor/` package for correction logic
-- correction JSON patch layer
-
-Validation:
-
-- Operator can correct a failed sample within 3 minutes
-- Rebuild after correction is deterministic
-
-Exit criteria:
-
-- The product is usable even when automation is imperfect
-
-### Phase 7. Explanation-Oriented 3D Scene Builder
-
-Goal:
-Produce scenes optimized for explanation, not CAD fidelity alone.
-
-Target outcomes:
-
-- Structured 3D scene payload
-- Colored damage overlays
-- Camera presets for customer explanation
-
-Implementation tasks:
-
-1. Introduce a scene builder layer separate from STEP/IFC export.
-2. Build room, wall, opening, and damage meshes as logical scene objects.
-3. Add presentation metadata:
-   - labels
-   - annotation anchors
-   - recommended camera views
-   - section/isolation presets
-4. Keep STEP/IFC exporters as secondary outputs, not the primary scene model.
-
-Suggested file additions:
-
-- `scene/builder.py`
-- `scene/view_presets.py`
-- `scene/types.py`
-
-Validation:
-
-- Open the same case in a viewer and confirm explanation flow is human-readable
-
-Exit criteria:
-
-- The canonical output becomes an explanation scene, not just CAD exports
-
-### Phase 8. Customer Delivery Outputs
-
-Goal:
-Package outputs for actual customer communication.
-
-Target outcomes:
-
-- Customer-ready still images
-- Overlay floor-plan visuals
-- Incident summary report
-- Scene export package
-
-Implementation tasks:
-
-1. Generate:
-   - incident summary JSON
-   - floor-plan overlay PNG
-   - labeled 3D snapshots
-   - report-ready asset bundle
-2. Add view presets:
-   - overall layout
-   - incident room focus
-   - damage spread view
-3. Define an export bundle structure for each case.
-
-Suggested file additions:
-
-- `reporting/package_case.py`
-- `reporting/render_summary.py`
-
-Validation:
-
-- One-click generation for a sample incident package
-
-Exit criteria:
-
-- A non-technical customer can understand the issue from the generated outputs
-
-### Phase 9. Observability and Quality Control
-
-Goal:
-Make failures visible and improve the system with evidence.
-
-Target outcomes:
-
-- Structured logs
-- Stage timing
-- Confidence and error reports
-- Regression-friendly artifacts
-
-Implementation tasks:
-
-1. Add per-stage logs with consistent IDs.
-2. Record:
-   - runtime
-   - input type
-   - confidence
-   - failure reason
-   - correction count
-3. Separate debug artifacts from final outputs.
-4. Add a case manifest per run.
-
-Suggested file additions:
-
-- `pipeline/logging.py`
-- `pipeline/run_manifest.py`
-
-Validation:
-
-- Failed runs are diagnosable without manual guesswork
-
-Exit criteria:
-
-- The team can see where and why the pipeline fails
-
-### Phase 10. Test and Release Discipline
-
-Goal:
-Move from experimentation to controlled delivery.
-
-Target outcomes:
-
-- Regression protection
-- Stable sample corpus
-- Release confidence
-
-Implementation tasks:
-
-1. Add tests for:
-   - schema validation
-   - PDF routing
-   - wall extraction
-   - room extraction
-   - scene payload generation
-   - STEP/IFC smoke export
-2. Create a small benchmark corpus under `samples/`.
-3. Add snapshot-based result checks for key JSON outputs.
-4. Define release criteria for MVP and v1.
-
-Suggested structure:
-
-- `tests/test_contracts.py`
-- `tests/test_ingest.py`
-- `tests/test_geometry.py`
-- `tests/test_scene.py`
-- `tests/test_exports.py`
-
-Validation:
-
-- All critical flows pass on the benchmark corpus before release
-
-Exit criteria:
-
-- The pipeline is measurable and regression-resistant
-
-## 5. Recommended 4-Week Execution Plan
-
-### Week 1
-
-Focus:
-
-- Phase 1
-- Phase 2 foundation
-
-Deliverables:
-
-- domain models
-- pipeline contracts
-- input classification cleanup
-- structured metadata output
-
-Verification:
-
-- schema tests
-- 3 sample-case contract snapshots
-
-### Week 2
-
-Focus:
-
-- Phase 3
-- Phase 4 foundation
-
-Deliverables:
-
-- stronger geometry refinement
-- door inference moved out of exporter fallback
-- adjacency graph
-- first room semantic pass
-
-Verification:
-
-- regression comparison on sample plans
-- manual review for 10 drawings
-
-### Week 3
-
-Focus:
-
-- Phase 5
-- Phase 6 MVP
-
-Deliverables:
-
-- leakage incident scene model
-- manual correction data format
-- correction workflow prototype
-
-Verification:
-
-- operator correction time trial
-- annotation persistence tests
-
-### Week 4
-
-Focus:
-
-- Phase 7
-- Phase 8
-- Phase 9 and 10 baseline
-
-Deliverables:
-
-- explanation scene builder
-- customer package generator
-- structured logs
-- initial automated test suite
-
-Verification:
-
-- end-to-end run from plan input to customer package
-- smoke export of STEP and IFC
-
-## 6. Immediate Coding Priority
-
-Start here first:
-
-1. `domain/models.py`
-2. `pipeline/contracts.py`
-3. refactor `parser/room_export.py`
-4. refactor `parser/export_step.py`
-5. refactor `parser/export_ifc.py`
-
-Reason:
-Without a proper data contract, every later improvement will stay brittle.
-
-## 7. Boundaries
-
-Do not do these early:
-
-- building a polished frontend first
-- chasing IFC perfection before scene semantics
-- forcing full automation without correction tools
-- expanding into full BIM scope
-
-## 8. Success Definition
-
-The MVP is successful when:
-
-- a Japanese floor plan can be ingested reliably,
-- the operator can correct extraction quickly,
-- leakage/damage semantics can be attached to the scene,
-- a customer-facing explanatory 3D package can be produced consistently.
+# 🌟 일본 소기업/개인 사업자 대상 즉시 판매용 'Japanbuild-Leak3D' MVP 최종 개발 계획서
+
+## 1. Project Definition & Business Goal
+
+본 프로젝트는 단순한 CAD-to-BIM 기하 변환 도구가 아닙니다.
+**일본 현지의 소규모 누수 탐지 업체, 개인 주택 진단사, 인테리어 시공업자**가 현장에서 도면을 스마트폰/태블릿으로 업로드하여 **3분 만에 3D 누수 시각화 모델 및 원청사/보험사 제출용 '1장짜리 공식 누수 소견서'를 생성**해내는 실전형 하자 분쟁 해결 솔루션입니다.
+
+### 🎯 핵심 비즈니스 목표 (일본 소기업 판매 규격)
+1. **도면 파싱 실패 극복**: 자동 인식의 현실적 한계(오인식, 벽 누락)를 작업자가 웹 화면에서 **2분 내에 수동 드래그로 즉시 보정**할 수 있는 2D-3D 분할 에디터 제공.
+2. **일본 현지법 책임 규명**: 맨션(공동주택) 누수 분쟁 시 가장 예민한 **공용부(共有部分) vs 전유부(専有部分) 책임 판정** 및 배관 공간(PS/DS) 매핑 기능 탑재.
+3. **결정적 세일즈 포인트**: 원청사 및 화재/손해보험 청구용 **'일본어 표준 누수 진단 보고서(漏水診断報告書)' A4 1장 출력 기능**.
+4. **글로벌 인프라 준비**: 엔화(JPY) 기반 **Stripe 결제 연동** 및 현지 작업자용 **완벽한 일본어 다국어화(i18n)**.
+
+---
+
+## 2. Current State (현재 상태 및 잔존 갭)
+
+현재 7대 핵심 검증 테스트(`verify_*.py`)가 100% PASS하여 백엔드의 벽체 복구, 다중 층 파싱, IFC 3D 변환 및 보정 델타 적용 로직은 완벽하게 동작하고 있습니다.
+
+### 🚨 상용 판매를 위한 잔존 갭 (Gaps to Market)
+*   **교정 에디터 UI 미완성**: 사용자가 직관적으로 조작할 브라우저 기반의 2D-3D 화면 인터페이스가 부재함.
+*   **일본 건축법 시맨틱 부족**: 일본 맨션 특유의 벽체/배관 표기(PS/DS) 인식 및 공용부/전유부 법적 판정 데이터 필드 미정립.
+*   **보고서 패키징 기능 부재**: 고객사(원청사, 보험사, 집주인)에게 메일이나 라인(LINE)으로 쏠 수 있는 깔끔한 일본어 PDF 출력 모듈 없음.
+*   **결제 및 다국어 장벽**: 구독/건당 결제를 위한 결제 게이트웨이 및 UI 일본어 지원 미비.
+
+---
+
+## 3. Delivery Strategy & Harness Principles
+
+"선보고 후실행, 계획-테스트-검증 3박자"의 **하네스 프로토콜(Harness Protocol)**을 준수합니다.
+
+*   **Circuit Breaker (회로 차단기)**: 2D-3D 실시간 재빌드 시간이 3초를 초과하거나 실패율이 3회 연속 10%를 넘을 경우, 즉시 큐(Queue) 비우고 fallback 3D 뷰어로 전환.
+*   **Context Firewall (맥락 방화벽)**: 모든 기하 파싱 및 3D 메시 연산은 `core/engine.py`와 `scene/` 모듈에 철저히 고립시켜 API 스코프가 기하 알고리즘의 복잡도에 오염되지 않도록 격리.
+*   **Hard Boundaries (엄격한 경계)**: 기존에 100% 검증 완료된 `verify_*.py` 기반의 파이프라인 코어는 절대로 깨뜨리지 않고 데코레이터나 어댑터 패턴으로 시맨틱 레이어를 확장.
+
+---
+
+## 4. User Review Required (대표님 결재 및 피드백 필요 사항)
+
+> [!IMPORTANT]
+> **일본 현지 세일즈 및 서비스 런칭을 위해 다음 사항에 대한 대표님의 승인이 필요합니다.**
+
+1. **Stripe 요금제 구성 안**:
+   *   **Basic Plan (월 4,900엔)**: 월 10건 도면 3D 변환 및 1장 리포트 생성.
+   *   **Pro Plan (월 9,800엔)**: 무제한 변환, 3D WebGL 공유 링크 제공, 3D 파일(IFC, STEP) 다운로드 무제한.
+   *   **Pay-per-case (건당 1,500엔)**: 비구독자용 1회성 결제.
+2. **일본어 리포트 공식 서식의 공신력**:
+   *   출력되는 PDF 보고서 상단에 **'일본 하자진단 표준 지침(住宅紛쟁처리기술기준) 준수'** 문구 및 시공사 날인(도장) 란을 포함할지 여부. (현장 소기업 사장님들은 날인 도장 이미지 업로드 기능을 매우 선호함).
+3. **공용부/전유부 판정 기준의 책임 한계 고지**:
+   *   우리 시스템이 도면과 누수원 위치를 기반으로 "공용부 책임 확률 85%" 등의 판정 보조를 내릴 때, 법적 분쟁 방지를 위한 면책 조항(Disclaimer)을 하단에 필수 기재할 예정입니다.
+
+---
+
+## 5. Phase Breakdown (상용화 최종 5단계 로드맵)
+
+### Phase 6. 2D-3D 분할 수동 교정 웹 에디터 UI 개발
+*   **목표**: 비전문가도 마우스나 태블릿 터치로 오차를 바로잡을 수 있는 반응형 에디터 구현.
+*   **구현 범위**:
+    1. **좌측 2D SVG 인터페이스**:
+       *   도면 위에 오버레이된 파싱 벽선 마우스 드래그(Drag) 조정.
+       *   방 폴리곤 클릭 시 우측 드롭다운으로 방 타입(LDK, 화장실, 배관실 등) 즉시 수정.
+       *   **누수 핀(Leak Pin)**: 마우스 우클릭 혹은 드래그로 누수 시발점 핀 장착.
+       *   **피해 브러시(Damage Brush)**: 2D Canvas 상에 마우스 드래그로 피해 면적 색칠 (Ceiling/Wall/Floor 구분).
+    2. **우측 Three.js WebGL 뷰어**:
+       *   좌측 2D 편집이 끝나거나 일시 정지될 때 델타 패치(`CorrectionBatchRequest`)를 3초 안에 백엔드로 전송.
+       *   백엔드 `rebuild_after_correction` 실행 후 반환된 3D IFC 데이터를 Three.js가 읽어 실시간 갱신(Orbit Controls, 단면 컷 뷰 지원).
+*   **백엔드 데이터 계약 (Delta Patch Schema)**:
+    ```json
+    {
+      "project_id": "proj_jp_2026_002",
+      "operations": [
+        {
+          "type": "MOVE_WALL",
+          "target_id": "wall_023",
+          "coordinates": {"p1": [12.5, 4.2], "p2": [12.5, 8.9]}
+        },
+        {
+          "type": "SET_ROOM_SEMANTICS",
+          "target_id": "room_004",
+          "semantics": {
+            "japanese_name": "浴室 (Bathroom)",
+            "is_wet_area": true,
+            "ownership": "PROPRIETARY"
+          }
+        },
+        {
+          "type": "ADD_LEAK_SOURCE",
+          "coordinates": [12.5, 5.5, 2.4],
+          "metadata": {
+            "source_type": "PS_PIPE_CORROSION",
+            "ownership_zone": "COMMON_SPACE",
+            "severity": "CRITICAL"
+          }
+        }
+      ]
+    }
+    ```
+*   **검증 및 테스트**:
+    *   `verify_editor_api.py`를 신설하여 델타 패치 투입 시 오차 없이 백엔드 DB와 IFC 파일이 3초 내에 동시 재빌드되는지 타임 아웃 검증.
+
+---
+
+### Phase 7. 일본 주택법 대응 공간 시맨틱스 및 공용부/전유부 판정 모듈
+*   **목표**: 일본 공동주택(맨션)의 하자 보수 소송 및 보험 청구의 핵심 쟁점인 책임 구역 분리.
+*   **구현 범위**:
+    1. **일본 주택 특화 스키마 매핑** (`compliance/jp_compliance.py` 신설):
+       *   방 종류에 일본 현지 건축 도면 약어 매핑 (LDK, 洋室, 和室, UT, WC, PS, DS, MB).
+       *   특히 **PS(Pipe Space, 파이프 스페이스)** 및 **DS(Duct Space, 덕트 스페이스)** 영역을 별도 중요 시맨틱 영역으로 분류.
+    2. **공용부 vs 전유부 판정 엔진**:
+       *   누수 핀이 꽂힌 벽체의 내부 배관 공간(PS/DS) 여부, 혹은 슬래브 상하부 위치 정보를 분석하여 **[공용부 책임(건물 장기수선충당금 처리 대상)]**인지 **[전유부 책임(개인 세대주 자부담 또는 일상생활배상책임보험 처리 대상)]**인지 1차 자동 판정 후 리포트에 출력.
+*   **검증 및 테스트**:
+    *   일본의 전형적인 맨션 누수 판례 5건(벽체 매립 배관 누수, 욕실 방수층 손상, 싱크대 하부 호스 탈락 등)의 시나리오 데이터를 입력하여 판정 엔진이 올바른 책임 소재 코멘트를 생성하는지 단위 테스트 작성.
+
+---
+
+### Phase 8. A4 1장 최적화 '일본어 누수 진단 보고서' PDF 생성기
+*   **목표**: 현장 사장님이 원청 대기업 및 손해보험사에 바로 전달할 수 있는 극도로 깔끔하고 가독성 높은 A4 1장 보고서 패키징.
+*   **구현 범위**:
+    1. **1장 레이아웃 디자인 시스템**:
+       *   정부 및 보험사 제출 규격에 맞춘 단정하고 신뢰감 주는 디자인.
+       *   **헤더**: 주소, 건물명, 진단 일자, 진단 기사 날인(도장 이미지).
+       *   **좌측 단**: 평면 2D 오버레이 이미지 (누수원 핀 및 피해 브러시 영역 표시).
+       *   **우측 단**: Three.js WebGL이 서버 사이드 혹은 클라이언트 사이드에서 캡처한 고해상도 3D 입체 투시도 (누수 발생 메커니즘을 3D 그래픽으로 직관적 설명).
+       *   **하단**: 누수 판정 결과 (공용/전유 여부, 예상 보수 비용 범위, 특이사항 코멘트).
+    2. **PDF 렌더링 파이프라인** (`exporter/pdf_generator.py` 신설):
+       *   `WeasyPrint` 또는 `ReportLab`을 활용하여 HTML/CSS 템플릿을 고해상도 인쇄용 PDF로 변환.
+       *   일본어 폰트(Noto Sans JP 등) 깨짐 방지 및 정렬 최적화.
+*   **검증 및 테스트**:
+    *   `verify_pdf_report.py`를 작성하여 10개 프로젝트 결과에 대해 PDF가 1.5MB 이하의 가볍고 선명한 파일로 2초 내에 자동 생성되는지 확인.
+
+---
+
+### Phase 9. Stripe 결제 및 다국어화(i18n) 통합
+*   **목표**: 일본 로컬 개인 사업자들의 신용카드 즉시 결제 및 완벽하게 일본어로 현지화된 서비스 인프라 구성.
+*   **구현 범위**:
+    1. **Stripe Japan API 연동**:
+       *   `stripe` 라이브러리를 활용하여 `/payments/checkout` 및 webhook 엔드포인트 구현.
+       *   신용카드, 편의점 결제(Konbini Payment) 등 일본 현지 선호 결제 수단 활성화.
+       *   사용자의 결제 상태(구독 만료, 크레딧 보유량)를 Supabase DB의 `profiles` 테이블과 연동하여 API 호출 시 미들웨어에서 권한 차단(Circuit Breaker).
+    2. **다국어(i18n) 엔진 탑재**:
+       *   프론트엔드 전체 UI 문구를 일본어로 완벽 번역 및 수용.
+       *   백엔드 파이프라인에서 방 감지 시 방 영문 라벨(toilet, bedroom)을 일본어 표준 표기(トイレ, 洋室)로 자동 변환하는 변환 맵 내장.
+
+---
+
+### Phase 10. 통합 E2E 검증 및 실전 QA (Verification Gate)
+*   **목표**: 실제 일본식 도면 PDF를 업로드하여 [자동 파싱] → [2D/3D 웹 에디터 수동 보정] → [책임 판정] → [PDF 진단 보고서 발행] → [결제 차감]에 이르는 전체 사용자 시나리오의 무결성 증명.
+*   **구현 범위**:
+    1. **모의 통합 테스트** (`tests/test_japan_market_e2e.py` 신설):
+       *   Stripe Mocking을 통한 가상 결제 완료 처리.
+       *   실제 수동 교정 API를 호출하여 누수원 핀을 주방(台所)과 벽 내부(PS)에 배치.
+       *   최종 PDF 리포트가 정상 생성되고, Supabase 스토리지에 업로드 완료되는 전 과정을 검증.
+    2. **모바일/태블릿 기기 호환성 테스트**:
+       *   아이패드 및 일본 현지 저가형 안드로이드 태블릿 크롬 브라우저에서 Three.js 3D 화면이 버벅임 없이 렌더링되는지 성능 한계 측정.
+
+---
+
+## 6. Recommended 5-Week Execution Plan (5주 완성 세부 일정)
+
+### 📅 1주차: 데이터 계약 및 일본 건축 시맨틱 기반 구축
+*   **주요 태스크**:
+    *   `domain/models.py` 및 `compliance/jp_compliance.py`에 일본 도면 약어, PS/DS 정의, 공용부/전유부 판정 로직 설계.
+    *   델타 패치(`CorrectionBatchRequest`) 백엔드 API 엔드포인트 `/projects/{project_id}/correction` 스키마 고정 및 Supabase 테이블 스키마 업데이트.
+*   **검증 가드**: `verify_step1_1.py` ~ `verify_step1_4.py`가 신규 시맨틱 필드를 포함한 채 100% PASS되는지 확인.
+
+### 📅 2주차: 2D-3D 분할 수동 교정 에디터 UI 개발 (프론트엔드 & WebGL)
+*   **주요 태스크**:
+    *   React/Next.js 기반 Left 2D Canvas (SVG 벽 드래깅, 룸 속성 변경 UI) 개발.
+    *   Right Three.js 3D WebGL 로더 및 카메라 프리셋(Leak Focus, Section View) 구축.
+    *   벽 이동 및 룸 타입 수정이 발생할 때 델타 패치 JSON을 자동 가공하여 서버에 쏘는 연동 파트 완성.
+*   **검증 가드**: 모의 교정 패치 전송 시, 3초 이내에 백엔드에서 `rebuild_after_correction()`이 돌아가 3D 모델이 갱신되는지 통합 테스트 통과.
+
+### 📅 3주차: 누수 매퍼, 피해 브러시 및 공용부/전유부 판정 엔진 완성
+*   **주요 태스크**:
+    *   2D 화면상의 원클릭 누수 핀 추가 및 피해 범위 다각형 채색(Damage Painting) UI 완성.
+    *   `jp_compliance.py` 내부의 판정 알고리즘을 실데이터와 연동하여 누수 핀 좌표에 근거한 공용부/전유부 판정 코멘트 자동 도출.
+*   **검증 가드**: 5개 표준 누수 판례 시나리오에 대한 판정 테스트 스위트 100% 통과.
+
+### 📅 4주차: A4 1장 일본어 누수 진단 보고서 PDF 자동 발행기 개발
+*   **주요 태스크**:
+    *   WeasyPrint 또는 HTML-to-PDF 엔진 탑재 및 일본어 표준 누수 소견서 템플릿(A4 1장 고정) 코딩.
+    *   Three.js 3D 뷰어 화면을 오프스크린 렌더링 또는 프론트엔드 스냅샷 API를 활용해 고해상도 PNG로 캡처한 뒤 PDF 템플릿 우측 단에 자동 박음 처리.
+*   **검증 가드**: 생성된 PDF 파일의 레이아웃 깨짐 없음 확인 및 파일 크기가 모바일 전송에 최적화(1.5MB 이하)되었는지 실사 확인.
+
+### 📅 5주차: Stripe 결제 연동, 다국어화 완료 및 E2E 최종 검수
+*   **주요 태스크**:
+    *   Stripe JPY 요금제 연동(월 4,900엔 / 건당 1,500엔) 및 사용자 결제 검증 미들웨어 탑재.
+    *   전체 UI 및 에러 메시지 일본어 다국어화(i18n) 작업 완비.
+    *   모바일/태블릿 최종 실기 테스트 및 100% PASS 통합 보고서 작성 후 배포 준비 완료.
+*   **검증 가드**: 최종 E2E 통합 테스트 `test_japan_market_e2e.py` 가동 및 100% 성공 증명.
+
+---
+
+## 7. Success Definition (상용 런칭 합격 기준)
+
+본 MVP의 완성은 다음 4대 지표를 완벽히 통과할 때 비로소 달성된 것으로 간주합니다:
+
+1. **에디터 반응 속도**: 작업자가 2D 에디터에서 벽을 드래그하거나 누수 핀을 수정한 후, 우측 Three.js WebGL 뷰어에 보정된 3D 씬이 실시간으로 재렌더링되는 시간이 **평균 3초 이내**일 것.
+2. **리포트 완성도**: 생성된 A4 1장 누수 진단 PDF가 깨짐 없는 정교한 일본어로 출력되며, 2D 도면 오버레이와 3D 입체 스냅샷이 오차 없이 시각화될 것.
+3. **법적/보험사 부합성**: 공용부/전유부 판정 코멘트가 일본 손해보험사 청구 가이드 및 맨션 하자 소송 판례의 핵심 기준(PS 내 위치, 슬래브 하부 등)과 일치할 것.
+4. **결제 및 사용성**: 일본 현지 카드 결제가 Stripe Sandbox에서 성공적으로 이루어지고, 모바일/태블릿에서 렉(Lag) 없이 에디터가 정상 작동할 것.
+
+---
+🛡️ **코다리 개발부장 보고 (충성! 대표님, 즉각 검토 후 재가 부탁드립니다!)**

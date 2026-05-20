@@ -51,8 +51,8 @@ class PipelineEngine:
         
         build_ifc_from_multi_floor(all_floor_payloads, out_ifc=ifc_path)
 
-        comp_path = os.path.join(self.output_dir, "page0_compliance.json")
-        rooms_json_path = os.path.join(self.output_dir, "page0_rooms.json")
+        rooms_json_paths = [os.path.join(self.output_dir, f"page{i}_rooms.json") for i in range(page_count)]
+        compliance_paths = [os.path.join(self.output_dir, f"page{i}_compliance.json") for i in range(page_count)]
         
         return {
             "status": "success",
@@ -60,8 +60,10 @@ class PipelineEngine:
             "page_count": page_count,
             "artifacts": {
                 "ifc": ifc_path,
-                "compliance": comp_path,
-                "rooms_json": rooms_json_path
+                "compliance": compliance_paths[0] if page_count == 1 else compliance_paths,
+                "rooms_json": rooms_json_paths[0] if page_count == 1 else rooms_json_paths,
+                "all_compliance": compliance_paths,
+                "all_rooms_json": rooms_json_paths
             }
         }
 
@@ -153,7 +155,8 @@ class PipelineEngine:
             
         from parser.export_ifc import build_ifc_from_meta
         ifc_path = os.path.join(self.output_dir, f"page{page_index}_result.ifc")
-        build_ifc_from_meta(payload, out_ifc=ifc_path, out_meta=ifc_path + ".meta.json")
+        ifc_meta_path = ifc_path + ".meta.json"
+        build_ifc_from_meta(payload, out_ifc=ifc_path, out_meta=ifc_meta_path)
         
         rooms_json_path = os.path.join(self.output_dir, f"page{page_index}_rooms.json")
         comp_path = os.path.join(self.output_dir, f"page{page_index}_compliance.json")
@@ -161,6 +164,7 @@ class PipelineEngine:
             "status": "success", 
             "artifacts": {
                 "ifc": ifc_path,
+                "ifc_meta": ifc_meta_path,
                 "rooms_json": rooms_json_path,
                 "compliance": comp_path
             }
