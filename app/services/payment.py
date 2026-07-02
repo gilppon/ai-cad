@@ -126,20 +126,61 @@ class StripePaymentService:
         }
 
     @classmethod
-    def verify_and_apply_webhook(cls, payload: Dict[str, Any], db: Any) -> Dict[str, Any]:
+    def verify_and_apply_webhook(cls, raw_body: bytes, sig_header: Optional[str], db: Any) -> Dict[str, Any]:
         """
         Stripe Webhook 결제 성공 이벤트를 받아 유저 라이선스 갱신.
-        Mock 세션도 동등하게 받아서 시뮬레이션 처리합니다.
+        운영 환경에서는 전자서명(stripe-signature)을 강제 검증하고,
+        개발 환경(development, local)에서 서명이 누락된 경우에만 Mock 우회를 허용합니다.
         """
-        user_id = payload.get("user_id")
-        plan_type = payload.get("plan_type", "single")
-        session_id = payload.get("session_id", "mock_session")
+        import json
+        is_prod = os.getenv("ENV") == "production"
         
+        user_id = None
+        plan_type = "single"
+        session_id = "mock_session"
+        
+        if not sig_header:
+            if is_prod:
+                logger.error("[Security Alert] Stripe Webhook signature missing in production environment!")
+                return {"status": "error", "message": "Missing stripe-signature header in production"}
+            
+            # 개발/로컬 모드에서의 Mock Payload 파싱 처리
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
+                user_id = payload.get("user_id")
+                plan_type = payload.get("plan_type", "single")
+                session_id = payload.get("session_id", "mock_session")
+            except Exception as e:
+                logger.error(f"Failed to parse mock webhook payload: {str(e)}")
+                return {"status": "error", "message": "Invalid JSON body"}
+        else:
+            # 실제 Stripe Webhook 서명 검증 수행
+            try:
+                import stripe
+                stripe.api_key = cls.STRIPE_API_KEY
+                
+                event = stripe.Webhook.construct_event(
+                    raw_body, sig_header, cls.STRIPE_WEBHOOK_SECRET
+                )
+                
+                # 결제 완료 또는 구독 생성 완료 세션 수신
+                if event.type in ("checkout.session.completed", "invoice.payment_succeeded"):
+                    session = event.data.object
+                    metadata = session.get("metadata", {}) or {}
+                    user_id = metadata.get("user_id")
+                    plan_type = metadata.get("plan_type", "single")
+                    session_id = session.get("id", "live_session")
+                else:
+                    logger.info(f"Stripe Webhook received unhandled event type: {event.type}")
+                    return {"status": "success", "message": f"Event type {event.type} bypassed"}
+            except Exception as e:
+                logger.error(f"[Security Warning] Stripe Webhook signature verification failed: {str(e)}")
+                return {"status": "error", "message": f"Signature verification failed: {str(e)}"}
+
         if not user_id:
-            return {"status": "error", "message": "Missing user_id"}
+            return {"status": "error", "message": "Missing user_id in payment event metadata"}
             
         # Supabase DB 'profiles' 혹은 'users' 테이블 업데이트 시도 (하네스 방화벽 장착)
-        # 만약 DB 테이블이나 칼럼이 없어도 크래시 없이 메타데이터/성공으로 Fallback 처리
         try:
             credits_to_add = 0
             if plan_type == "single":
@@ -149,7 +190,6 @@ class StripePaymentService:
             elif plan_type == "pro":
                 credits_to_add = 99999  # 무제한
                 
-            # 유저의 프로필 가져오기
             profile_res = db.table("profiles").select("*").eq("id", user_id).execute()
             
             if profile_res.data:
@@ -161,7 +201,6 @@ class StripePaymentService:
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }).eq("id", user_id).execute()
             else:
-                # 레코드가 없다면 인서트 시도
                 db.table("profiles").insert({
                     "id": user_id,
                     "plan_type": plan_type,
@@ -175,7 +214,6 @@ class StripePaymentService:
             
         except Exception as e:
             logger.error(f"[Context Firewall Fallback] DB update failed during payment webhook: {str(e)}")
-            # 만약 칼럼이 없다면 안전하게 200 OK로 폴백 (Stripe 에러 무한 재시도 방지 및 로그 적재)
             return {
                 "status": "fallback_success",
                 "user_id": user_id,

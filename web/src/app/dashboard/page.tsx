@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import ThreeDViewer from "@/components/ThreeDViewer";
 import { getLocalSession, UserSession } from "@/utils/supabase";
+import { API_BASE_URL } from "@/utils/api";
 
 export default function DashboardPage() {
   const [session, setSession] = useState<UserSession | null>(null);
@@ -16,6 +17,79 @@ export default function DashboardPage() {
   const [selectedFloor, setSelectedFloor] = useState<string>("2F");
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
+
+  const handleFileUpload = async (file: File) => {
+    if (!file || !file.name.endsWith('.pdf')) {
+      alert("Only PDF files are supported. (.pdf)");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress("Uploading PDF to FastAPI Backend...");
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/convert`, {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-key"
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || "PDF upload failed");
+      }
+
+      const data = await response.json();
+      const taskId = data.task_id;
+      setUploadProgress("Analyzing CAD elements (FastAPI + Celery)...");
+
+      // Poll task status
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}`);
+          if (!statusRes.ok) throw new Error("Failed to get task status");
+          const statusData = await statusRes.json();
+          
+          if (statusData.status === "SUCCESS") {
+            clearInterval(interval);
+            setIsUploading(false);
+            setUploadProgress("Success!");
+            
+            // Extract project id from result
+            const result = statusData.result || {};
+            const projectId = result.project_id || "mock_project_123";
+            
+            alert("CAD 2D-to-3D IFC reconstruction successful! Entering Workspace...");
+            window.location.href = `/dashboard/editor?project_id=${projectId}`;
+          } else if (statusData.status === "FAILURE") {
+            clearInterval(interval);
+            setIsUploading(false);
+            setUploadProgress("Failed");
+            alert("CAD Reconstruction failed: " + statusData.error);
+          } else {
+            const progress = statusData.progress || 10;
+            setUploadProgress(`Processing CAD geometry... (${progress}%)`);
+          }
+        } catch (err: any) {
+          clearInterval(interval);
+          setIsUploading(false);
+          setUploadProgress("Status check error.");
+          console.error(err);
+        }
+      }, 1500);
+
+    } catch (err: any) {
+      setIsUploading(false);
+      setUploadProgress("");
+      alert(err.message || "Failed to communicate with FastAPI server.");
+    }
+  };
 
   useEffect(() => {
     setSession(getLocalSession());
@@ -554,29 +628,54 @@ export default function DashboardPage() {
             }`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
-            onDrop={(e) => { e.preventDefault(); setIsDragging(false); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleFileUpload(e.dataTransfer.files[0]);
+              }
+            }}
           >
             <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-500/5 via-transparent to-transparent opacity-0 transition-opacity duration-500" style={{ opacity: isDragging ? 1 : 0 }}></div>
             
-            <div className={`p-5 bg-neutral-950 rounded-full mb-4 shadow-2xl border border-neutral-800/60 transition-transform duration-300 ${isDragging ? "scale-110 text-blue-400 border-blue-500" : "text-neutral-500"}`}>
-              <UploadCloud className="w-10 h-10" />
-            </div>
-            
-            <h3 className="text-xl font-bold text-white mb-2">2D竣工図面 PDFアップロード & 3D IFC復元</h3>
-            <p className="text-xs text-neutral-400 max-w-md mx-auto mb-6 font-sans">
-              国土交通省(MLIT) 竣工図書提出規格を完全準拠。2D PDFをドラッグ＆ドロップすると、AI幾何復元およびRAG建築基準法適合性検格が実行されます。
-            </p>
-            
-            <label className="relative overflow-hidden group cursor-pointer">
-              <input type="file" className="hidden" accept=".pdf" />
-              <div className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-blue-500/20 transition-all flex items-center gap-2 border border-blue-400/30">
-                <span>新規ファイル参照 (Browse PDF)</span>
-                <ChevronRight className="w-3.5 h-3.5" />
+            {isUploading ? (
+              <div className="flex flex-col items-center py-6">
+                <RefreshCw className="w-10 h-10 text-blue-400 animate-spin mb-4" />
+                <h3 className="text-lg font-bold text-white mb-2">BIM 3D 자동 변환 진행 중...</h3>
+                <p className="text-xs text-blue-400 font-mono tracking-widest uppercase">{uploadProgress}</p>
               </div>
-            </label>
-            <p className="mt-4 text-[10px] text-neutral-600 font-mono">
-              Supports .pdf (max 50MB) | 🟢 3D IFC 変換: 3 Credits | 🔥 適合性報告書(PDF)発行: 10 Credits
-            </p>
+            ) : (
+              <>
+                <div className={`p-5 bg-neutral-950 rounded-full mb-4 shadow-2xl border border-neutral-800/60 transition-transform duration-300 ${isDragging ? "scale-110 text-blue-400 border-blue-500" : "text-neutral-500"}`}>
+                  <UploadCloud className="w-10 h-10" />
+                </div>
+                
+                <h3 className="text-xl font-bold text-white mb-2">2D竣工図面 PDFアップロード & 3D IFC復元</h3>
+                <p className="text-xs text-neutral-400 max-w-md mx-auto mb-6 font-sans">
+                  国土交通省(MLIT) 竣工図書提出規格를 완전 준수. 2D PDF를 드래그&드롭하거나 업로드하여 AI 기하 복원 및 법규 준수 검증을 가동하십시오.
+                </p>
+                
+                <label className="relative overflow-hidden group cursor-pointer">
+                  <input 
+                    type="file" 
+                    className="hidden" 
+                    accept=".pdf" 
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleFileUpload(e.target.files[0]);
+                      }
+                    }}
+                  />
+                  <div className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-blue-500/20 transition-all flex items-center gap-2 border border-blue-400/30">
+                    <span>新規ファイル参照 (Browse PDF)</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </div>
+                </label>
+                <p className="mt-4 text-[10px] text-neutral-600 font-mono">
+                  Supports .pdf (max 50MB) | 🟢 3D IFC 変換: 3 Credits | 🔥 適合性報告書(PDF)発行: 10 Credits
+                </p>
+              </>
+            )}
           </div>
 
         </div>

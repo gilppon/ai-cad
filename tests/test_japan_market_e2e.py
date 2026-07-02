@@ -102,8 +102,9 @@ def get_mock_user_and_db():
 @pytest.fixture(autouse=True)
 def setup_mocks():
     # API Router 의존성 주입 오버라이드
-    from app.api.deps import get_current_user_and_db
+    from app.api.deps import get_current_user_and_db, get_supabase_client
     app.dependency_overrides[get_current_user_and_db] = get_mock_user_and_db
+    app.dependency_overrides[get_supabase_client] = lambda: GLOBAL_MOCK_DB
     
     # 각 테스트 시작 전 DB 상태 초기화 (독립성 확보)
     GLOBAL_MOCK_DB.table("profiles")._data = [

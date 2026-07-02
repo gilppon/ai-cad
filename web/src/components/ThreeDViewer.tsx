@@ -148,9 +148,38 @@ export default function ThreeDViewer({
     controlsRef.current = controls;
 
     const createdObjects: THREE.Object3D[] = [];
-    const SCALE = 0.22; 
-    const OFFSET_X = 200; 
-    const OFFSET_Z = 150;
+    
+    // Bounding Box dynamic centering & scaling for non-mock real project CAD files
+    let SCALE = 0.22; 
+    let OFFSET_X = 200; 
+    let OFFSET_Z = 150;
+
+    if (walls && walls.length > 0) {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      walls.forEach(w => {
+        if (w.p1 && w.p2) {
+          xs.push(w.p1.x, w.p2.x);
+          ys.push(w.p1.y, w.p2.y);
+        }
+      });
+      if (xs.length > 0) {
+        const minX_coord = Math.min(...xs);
+        const maxX_coord = Math.max(...xs);
+        const minY_coord = Math.min(...ys);
+        const maxY_coord = Math.max(...ys);
+
+        OFFSET_X = (minX_coord + maxX_coord) / 2;
+        OFFSET_Z = (minY_coord + maxY_coord) / 2;
+
+        const sizeX = maxX_coord - minX_coord || 1;
+        const sizeY = maxY_coord - minY_coord || 1;
+        const maxDim = Math.max(sizeX, sizeY);
+        
+        // Scale to fit beautifully inside the 180x180 neon barrier cage
+        SCALE = 180 / maxDim;
+      }
+    }
 
     // A. 지면 바운더리 네온 펜스 장막 (Neon Aura Barrier Wall) 생성
     const fenceColor = hudTab === "geology" ? 0xff7700 : hudTab === "inspect" ? 0xff0055 : 0x00d2ff;
@@ -812,14 +841,17 @@ export default function ThreeDViewer({
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", handleResize);
       
-      createdObjects.forEach((obj) => {
-        scene.remove(obj);
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry.dispose();
-          if (Array.isArray(obj.material)) {
-            obj.material.forEach((m) => m.dispose());
-          } else {
-            obj.material.dispose();
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.LineSegments || obj instanceof THREE.Points) {
+          if (obj.geometry) {
+            obj.geometry.dispose();
+          }
+          if (obj.material) {
+            if (Array.isArray(obj.material)) {
+              obj.material.forEach((m) => m.dispose());
+            } else {
+              obj.material.dispose();
+            }
           }
         }
       });

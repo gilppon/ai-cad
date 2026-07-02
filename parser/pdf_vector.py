@@ -8,7 +8,7 @@ import fitz
 from typing import List, Dict, Any
 from domain.models import Point, Wall
 from pipeline.contracts import validate_geometry_payload, build_geometry_payload, build_processing_metadata
-from parser.line_refine import Line, refine_lines, merge_collinear_segments, snap_endpoints, merge_parallel_pairs
+from parser.line_refine import Line, refine_lines, merge_collinear_segments, snap_endpoints, merge_parallel_pairs, filter_structural_walls
 from parser.room_detect import detect_rooms_from_walls
 from parser.room_export import rooms_to_json_dict
 
@@ -56,17 +56,22 @@ def extract_vector_geometry(pdf_path: str, page_index: int = 0) -> Dict[str, Any
                     raw_segments.append((x0, y1, x0, y0)) # Left
 
     # --- Refinement Pipeline ---
-    # 1. Basic refinement (snap to axis, min_len filter)
-    refined = refine_lines(raw_segments, min_len=2.0) # Vector can have shorter meaningful segments
+    # 1. Basic refinement (snap to axis, structural min_len filter)
+    # Increased to 25.0 to filter out tiny details (text, dimensions, symbols, grid, hatches)
+    refined = refine_lines(raw_segments, min_len=25.0)
     
     # 2. Merge collinear (combine broken segments)
-    refined = merge_collinear_segments(refined, dist_tol=1.0, gap_tol=5.0)
+    refined = merge_collinear_segments(refined, dist_tol=2.0, gap_tol=10.0)
     
     # 3. Snap endpoints (ensure connectivity)
-    refined = snap_endpoints(refined, snap_dist=2.0)
+    refined = snap_endpoints(refined, snap_dist=8.0)
     
     # 4. Merge parallel pairs (cleanup overlaps)
-    refined = merge_parallel_pairs(refined, dist_tol=2.0)
+    refined = merge_parallel_pairs(refined, dist_tol=4.0)
+
+    # 5. Filter structural walls (eliminate isolated decorative lines/grid segments)
+    refined = filter_structural_walls(refined, min_len_ratio=0.01, min_degree=1, join_tol=15)
+
 
     walls: List[Wall] = []
     for i, l in enumerate(refined):

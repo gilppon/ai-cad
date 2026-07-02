@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.endpoints import router as api_router
@@ -8,14 +9,29 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS 설정 (프론트엔드 연동 대비)
+# CORS 설정 (프로덕션 및 로컬 개발 환경 분리)
+# allow_credentials=True 상태에서는 브라우저 보안 표준에 의해 와일드카드(*) 오리진 사용이 불가하므로 명시적 도메인 바인딩 적용
+environment = os.getenv("ENV", "development")
+if environment == "production":
+    origins = [
+        "https://japanbuild-bim3d.jp",
+        "https://www.japanbuild-bim3d.jp",
+        "https://japanbuild-bim3d-app.pages.dev"
+    ]
+else:
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # 라우터 연결
 app.include_router(api_router, prefix="/api/v1")

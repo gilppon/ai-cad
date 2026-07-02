@@ -8,6 +8,7 @@ import {
   Loader2
 } from "lucide-react";
 import ThreeDViewer from "@/components/ThreeDViewer";
+import { API_BASE_URL } from "@/utils/api";
 
 interface Point {
   x: number;
@@ -52,6 +53,7 @@ function EditorContent() {
   // 상태 관리 (2D 도면 데이터 및 기하 상태)
   const [walls, setWalls] = useState<Wall[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [canvas, setCanvas] = useState<{ width: number; height: number }>({ width: 500, height: 400 });
   const [leakSources, setLeakSources] = useState<LeakSource[]>([]);
   const [damageZones, setDamageZones] = useState<DamageZone[]>([]);
   
@@ -72,7 +74,11 @@ function EditorContent() {
       setIsLoading(true);
       try {
         // 실제 API 연동 시도 (실패 시 mock 데이터로 우아하게 대응하는 서킷 브레이커)
-        const res = await fetch(`/api/v1/projects/${projectId}`);
+        const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/geometry`, {
+          headers: {
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-key"
+          }
+        });
         if (res.ok) {
           const data = await res.json();
           // API 데이터 바인딩
@@ -81,6 +87,9 @@ function EditorContent() {
           setLeakSources(data.incident?.leak_sources || []);
           setDamageZones(data.incident?.damage_zones || []);
           setComplianceOpinions(data.incident?.compliance_opinions || []);
+          if (data.canvas) {
+            setCanvas(data.canvas);
+          }
         } else {
           // Fallback Mock Data (개발용 시각적 완성도 보장)
           setWalls([
@@ -229,9 +238,12 @@ function EditorContent() {
         operations: operations
       };
 
-      const res = await fetch(`/api/v1/projects/${projectId}/correction`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/correction`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-key"
+        },
         body: JSON.stringify(payload)
       });
 
@@ -319,7 +331,7 @@ function EditorContent() {
             ) : (
               <svg 
                 className="w-full h-full min-h-[450px] cursor-crosshair select-none"
-                viewBox="0 0 500 400"
+                viewBox={`0 0 ${canvas.width} ${canvas.height}`}
                 onMouseDown={handleSvgMouseDown}
                 onMouseMove={handleSvgMouseMove}
                 onMouseUp={handleSvgMouseUp}

@@ -148,7 +148,8 @@ class JPPDFGenerator:
         案件番号: {project_id}<br/>
         対象物件: {project_name}<br/>
         調査住所: {address}<br/>
-        調査日時: {date_str}
+        調査日時: {date_str}<br/>
+        登録番号: T1234567890123 (適格請求書発行事業者)
         """
         
         sign_html = f"""

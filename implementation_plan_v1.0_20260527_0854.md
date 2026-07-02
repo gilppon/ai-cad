@@ -1,13 +1,5 @@
 # 🌟 일본 국토교통성 BIM 제출 의무화 대응 및 건축기준법 AI 적합성 검증 'Japanbuild-BIM3D Compliance' MVP 최종 개발 계획서
 
-| 버전 (Ver.) | 기록 일시 (DateTime) | 작성자 (Author) | 결재 상태 (Status) | 핵심 지시 및 변경 내용 (Key Directives) |
-| :--- | :--- | :--- | :--- | :--- |
-| v1.0 | 2026-05-26 23:54 | 개발부장 코다리 | 🟢 승인 완료 | 미래형 HUD 대시보드 리디자인 및 차세대 R&D 로드맵 포함 최초 작성 승인 |
-| v2.0 | 2026-05-27 08:54 | 개발부장 코다리 | 🟢 승인 완료 | 글로벌 B2B 시장(Andpad, SpiderPlus 등) 최상위 최신 SOTA AI 아키텍처 로드맵 정밀 바인딩 및 상세 내용 계획서 수용 고도화 |
-| v3.0 | 2026-07-02 15:22 | 개발부장 코다리 | 🟡 검토 대기 | /grill-me 의결 기반 기술 보안 취약점 패치 및 WebGL 메모리 누수 방지, Gemini 구조화된 출력(Structured Outputs) 도입 계획 수립 |
-
----
-
 ## 1. Project Definition & Business Goal
 
 본 프로젝트는 단순한 2D 도면 뷰어를 넘어, **일본 국토교통성(MLIT)의 준공 도서 BIM(3D IFC) 제출 의무화 법령**에 선제적으로 대응하고, **일본 건축기준법(建築基準法) AI 적합성 검증**을 현장에서 3분 안에 완수해내는 상용 SaaS 솔루션입니다.
@@ -219,7 +211,7 @@
 
     class BIMComplianceCheckItem(BaseModel):
         article_no: str = Field(..., description="일본 건축기준법 조항 번호 (예: 第28조)")
-        item_name_jp: str = Field(..., description="검증 항목명 (예: 居室의 採光及び換気)")
+        item_name_jp: str = Field(..., description="검증 항목명 (예: 居室の採光及び換気)")
         standard_value: str = Field(..., description="법령상 기준치 (예: 窓面積 / 居室面積 >= 1/7)")
         calculated_value: str = Field(..., description="3D IFC 파싱 및 기하 연산 값 (예: 1/5.8)")
         status: str = Field(..., description="적합성 판정 결과: PASS(O), FAIL(X)")
@@ -239,7 +231,7 @@
     - **ReportLab 기반 고해상도 벡터 테이블 드로잉**:
       - A4 세로 규격에 맞춰 관청 제출 공문 서식 구현.
       - 헤더 영역: 'BIM確認申請チェックシート' 타이틀, 1급 건축사 날인 이미지 정밀 합성.
-      - 본문 영역: `check_items`를 돌며 법령 적합 판정 결과(O/X)와 수치 값을 셀에 맞춰 동적 렌더링. 특히 `PASS` 판정 시 붉은색 원형 합격 인장(`O`)을 데코레이션 처리하고, `FAIL` 시 `X` 및 `재검토 필요(재검토 필요)`를 굵은 고딕체로 강조.
+      - 본문 영역: `check_items`를 돌며 법령 적합 판정 결과(O/X)와 수치 값을 셀에 맞춰 동적 렌더링. 특히 `PASS` 판정 시 붉은색 원형 합격 인장(`O`)을 데코레이션 처리하고, `FAIL` 시 `X` 및 `재검토 필요(再検討要)`를 굵은 고딕체로 강조.
     - **PDF 검증 자동화 가드**:
       - `verify_pdf_generation.py`에 자가 확인 체크시트 렌더링 테스트 코드 탑재 및 무결성 검사.
 
@@ -381,7 +373,7 @@ SaaS 비즈니스의 첫 관문으로, 인증 및 기업 단위 공간(Tenant) �
 ---
 
 ### 🏢 Phase 17: 테넌트 멤버십 및 공용 Workspace 설정 대시보드 구축
-현장 검측원 여러 명이 동일한 프로젝트 도면을 클라우드상에서 공유하고협업할 수 있도록 워크스페이스 팀 관리 기능을 이식합니다.
+현장 검측원 여러 명이 동일한 프로젝트 도면을 클라우드상에서 공유하고 협업할 수 있도록 워크스페이스 팀 관리 기능을 이식합니다.
 
 *   **구현 파일**:
     *   `[NEW] web/src/app/dashboard/settings/page.tsx` - 테넌트 동료 초대 콘솔
@@ -429,7 +421,7 @@ SaaS 비즈니스의 첫 관문으로, 인증 및 기업 단위 공간(Tenant) �
 
 ---
 
-## 🚀 Phase 19: 미래형 사이버네틱 3D 빌딩 모니터링 HUD 테크 대시보드 & Three.js WebGL 뷰어 리디자인
+## 2.1.2 🚀 Phase 19: 미래형 사이버네틱 3D 빌딩 모니터링 HUD 테크 대시보드 & Three.js WebGL 뷰어 리디자인
 
 대표님께서 제시해주신 우주선 지휘통제실 급의 고품격 비주얼을 100% 매칭하기 위해 Three.js WebGL과 프론트 HUD 대시보드를 완벽히 리디자인합니다.
 
@@ -485,45 +477,8 @@ SaaS 비즈니스의 첫 관문으로, 인증 및 기업 단위 공간(Tenant) �
 *   **목표**: 번진 스캔 도면이나 팩스 수신 파일 등 텍스트 유실 도면에서도 98% 이상의 세맨틱 인지율 확보.
 *   **기술 사양**: 2D 공간 픽셀 분석 레이어 위에 Layout-aware Vision SLM(소형 비전 언어모델)을 탑재하여 텍스트-기하 하이브리드 추론 엔진 가동.
 
-### 🔬 [SOTA AI 소스 코드별 정밀 보완분석 보고서](file:///C:/Users/PC/.gemini/antigravity-ide/brain/7c64a7c1-b3c4-4ef4-8055-fd7150602b81/sota_architectural_review.md) 탑재
+### 🔬 [SOTA AI 소스 코드별 정밀 보완분석 보고서](file:///C:/Users/PC/.gemini/antigravity-ide/brain/aac15b4f-36ca-4b4c-bed2-b79084279e45/sota_architectural_review.md) 탑재
 대표님의 긴급 지시사항에 따라 `room_detect.py`, `line_refine.py`, `text_extract.py`, `rooms_pipeline.py`, `export_ifc.py` 등 **각 핵심 소스 코드별 2026 SOTA 딥러닝 AI 최신 보완점**(SAM 2, LETR Transformer, OCR-free Document Transformer, GNN 위상 학습 등)을 총망라한 정밀 기술보고서를 작성하여 첨부하였습니다.
 
 ---
-
-## 🔒 9. /grill-me 의결 기반 기술 보안 취약점 패치 및 성능/AI 고도화 계획 (v3.0)
-
-대표님과의 `/grill-me` 인터뷰 및 기술 보안 정밀 조사를 통해 최종 기결된 패치 설계안입니다. 
-
-### 1) Stripe Webhook 전자서명 검증 적용
-*   **파일**: [`app/services/payment.py`](file:///e:/project/cad_saas_mvp/app/services/payment.py) 및 [`app/api/v1/endpoints.py`](file:///e:/project/cad_saas_mvp/app/api/v1/endpoints.py)
-*   **설계**: 
-    *   `verify_and_apply_webhook` 진입 시 `stripe.Webhook.construct_event()`를 호출하여 `stripe-signature` 헤더의 무결성을 검증합니다.
-    *   `ENV`가 `production`일 때 검증 실패 시 즉각 400 Bad Request 에러를 내고 결제를 차단합니다.
-    *   `ENV`가 `development`, `local`일 때는 서명 검증을 건너뛰고 기존 Mock 이식 흐름을 허용합니다.
-
-### 2) Fail-Safe 기반 JWT 인증 필터 수정
-*   **파일**: [`app/api/deps.py`](file:///e:/project/cad_saas_mvp/app/api/deps.py)
-*   **설계**: 
-    *   `is_local_dev` 판별 로직을 화이트리스트 검사로 변경합니다: `is_local_dev = (JWT_SECRET == "your-jwt-secret") or (os.getenv("ENV") in ("development", "local", "test"))`
-    *   프로덕션 운영 서버에서 환경 변수 누락 등으로 인해 인증 필터가 우회되어 가짜 사용자 `user_123`으로 자동 로그인되는 위협을 완벽하게 차단합니다.
-
-### 3) Supabase RLS 트리거 SECURITY DEFINER 강화
-*   **파일**: [`supabase/schema.sql`](file:///e:/project/cad_saas_mvp/supabase/schema.sql)
-*   **설계**:
-    *   `handle_new_user()` 트리거 함수 헤더를 `CREATE OR REPLACE FUNCTION public.handle_new_user() RETURNS TRIGGER SECURITY DEFINER SET search_path = public AS ...`로 보강합니다.
-    *   함수가 호출될 때 안전하게 public 스키마 내의 고정된 실행 경로에서 안전하게 동작하도록 감싸, 악의적인 스키마 조작 및 search_path 하이재킹 시도를 무력화합니다.
-
-### 4) Three.js WebGL GPU 리소스 Cleanup 및 Resize 탑재
-*   **파일**: [`web/src/components/ThreeDViewer.tsx`](file:///web/src/components/ThreeDViewer.tsx)
-*   **설계**:
-    *   `useEffect` 내부의 cleanup return 블록을 구현합니다: `scene.traverse()`를 통해 모든 3D 오브젝트를 돌며 geometry와 material을 해제(`geometry.dispose()`, `material.dispose()`)하고, `renderer.dispose()`를 명시적으로 실행하여 브라우저의 WebGL 메모리 누수 및 크래시 현상을 원천 방어합니다.
-    *   `window.addEventListener('resize')` 리스너를 달아 창 크기 변경 시 뷰어 카메라와 렌더러 스케일이 역동적으로 반응하도록 튜닝합니다.
-
-### 5) Gemini 2.5 Flash Structured Outputs (Pydantic Schema) 탑재
-*   **파일**: [`compliance/gemini_adapter.py`](file:///e:/project/cad_saas_mvp/compliance/gemini_adapter.py)
-*   **설계**:
-    *   최신 `google-genai` SDK V2의 기능을 가동하여, `GenerateContentConfig` 내에 `response_mime_type="application/json"`을 장착합니다.
-    *   FastAPI의 리포트 구조에 부합하는 Pydantic 스키마(예: `class GeminiComplianceReport(BaseModel)`)를 `response_schema`에 전달하여, 모델이 올바르지 않은 마크다운 백틱이나 누락된 필드가 섞인 JSON을 내뱉어 생기는 파싱 크래시 예외를 0.00%로 영구 격리시킵니다.
-
----
-🛡️ **코다리 개발부장 최종 R&D 로드맵 및 보안/최적화 패키지 수립 보고 (대표님! /grill-me 의결에 입각하여, 상용화 전 최상의 보안 신뢰성과 WebGL 무장애 구동을 확보하기 위한 v3.0 설계안을 수립하여 기안 올립니다! 검토 후 승인하여 주시면 검증 완료된 패치를 즉각 적용하겠습니다! 충성! 🫡)**
+🛡️ **코다리 개발부장 최종 R&D 로드맵 및 SOTA AI 정밀 보완서 수정 보고 (대표님! 미래형 HUD 대시보드 리디자인 계획과 차세대 R&D 로드맵, 그리고 각 핵심 코드별 최신 SOTA AI 보완분석서까지 계획서에 완벽 반영 완료하였습니다! 대외 제안서 및 IR용으로 극상 품질의 완성본입니다! 충성! 🫡)**

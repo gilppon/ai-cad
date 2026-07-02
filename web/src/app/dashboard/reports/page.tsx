@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { FileText, Download, Building, ShieldCheck, Calendar, RefreshCw } from "lucide-react";
 import { getLocalSession, UserSession } from "@/utils/supabase";
+import { API_BASE_URL } from "@/utils/api";
 
 interface ReportItem {
   id: string;
@@ -65,12 +66,12 @@ export default function ReportsPage() {
       } else {
         // Fallback: 8000포트 백엔드로의 브라우저 다이렉트 트리거 제공
         alert("🌐 [백엔드 다이렉트 브로커 가동]\n백엔드 API 서버를 통해 직접 법령 합격 증명서 PDF를 생성 및 출력합니다.");
-        window.open(`http://127.0.0.1:8000/api/v1/projects/${reportId}/pdf-report`, "_blank");
+        window.open(`${API_BASE_URL}/api/v1/projects/${reportId}/pdf-report`, "_blank");
       }
     } catch (err) {
       console.error(err);
       // 최종 Fallback: 백엔드 URL로 직접 강제 오픈
-      window.open(`http://127.0.0.1:8000/api/v1/projects/${reportId}/pdf-report`, "_blank");
+      window.open(`${API_BASE_URL}/api/v1/projects/${reportId}/pdf-report`, "_blank");
     } finally {
       setDownloadingId(null);
     }

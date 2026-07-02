@@ -26,7 +26,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     
     # [하네스 서킷 브레이커] 로컬 샌드박스 또는 Mock 세션 대응 (통신 장애 및 로컬 무인증 무장애 확보)
     is_mock_token = token in ("mock-key", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-key") or token.endswith(".mock-key")
-    is_local_dev = JWT_SECRET == "your-jwt-secret" or os.getenv("ENV") != "production"
+    is_local_dev = JWT_SECRET == "your-jwt-secret" or os.getenv("ENV") in ("development", "local", "test")
     
     if is_mock_token and is_local_dev:
         # 가상의 B2B 적격 임기 대표자 ID 반환하여 프론트/백 크래시 전면 방지
