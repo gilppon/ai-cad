@@ -343,7 +343,11 @@ export default function ThreeDViewer({
       const p2x = (wall.p2.x - OFFSET_X) * SCALE;
       const p2z = (wall.p2.y - OFFSET_Z) * SCALE;
 
-      const thickness = (wall.thickness_px || 10.0) * SCALE * (hudTab === "construction" ? 0.5 : 1.3);
+      let rawThickness = wall.thickness_px || 10.0;
+      if (rawThickness < 3.0) {
+        rawThickness = 8.0; // 얇은 벡터 벽체 최소 8px 두께 확보
+      }
+      const thickness = rawThickness * SCALE * (hudTab === "construction" ? 0.5 : 1.3);
       const wallHeight = hudTab === "geology" ? 22 : 45; 
 
       let wallOpacity = 0.55;

@@ -348,9 +348,13 @@ function EditorContent() {
                 {/* 1. 룸 폴리곤 오버레이 */}
                 {rooms.map(room => {
                   const pointsStr = room.polygon.map(p => `${p.x},${p.y}`).join(" ");
-                  let colorClass = "fill-neutral-800/40 stroke-neutral-700";
-                  if (room.kind === "toilet") colorClass = "fill-blue-500/20 stroke-blue-500/40";
-                  if (room.kind === "shaft") colorClass = "fill-orange-500/20 stroke-orange-500/40";
+                  let colorClass = "fill-neutral-500/10 stroke-neutral-500/40";
+                  const k = room.kind?.toLowerCase();
+                  if (k === "toilet" || k === "wet") colorClass = "fill-blue-500/20 stroke-blue-500/50";
+                  else if (k === "shaft" || k === "pipe_space") colorClass = "fill-orange-500/20 stroke-orange-500/50";
+                  else if (k === "ldk") colorClass = "fill-emerald-500/20 stroke-emerald-500/50 animate-pulse";
+                  else if (k === "bedroom" || k === "room") colorClass = "fill-purple-500/20 stroke-purple-500/50";
+                  else if (k === "corridor") colorClass = "fill-cyan-500/15 stroke-cyan-500/40";
 
                   return (
                     <polygon
@@ -370,8 +374,8 @@ function EditorContent() {
                       y1={wall.p1.y}
                       x2={wall.p2.x}
                       y2={wall.p2.y}
-                      stroke="#4b5563"
-                      strokeWidth={wall.thickness_px}
+                      stroke="#64748b"
+                      strokeWidth={Math.max(5, wall.thickness_px || 5)}
                       className="hover:stroke-blue-500 transition-colors cursor-pointer"
                       onClick={() => setSelectedWall(wall)}
                     />
