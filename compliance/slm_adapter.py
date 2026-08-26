@@ -5,6 +5,10 @@ from openai import OpenAI
 from compliance.rag.retriever import retrieve_relevant_laws
 from compliance.rag.prompts import build_slm_prompt
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class LMStudioSLMAdapter:
     """
     Adapter for a local SLM running on LM Studio via OpenAI-compatible API.
@@ -49,7 +53,7 @@ class LMStudioSLMAdapter:
             result = json.loads(content.strip())
             return result
         except Exception as e:
-            print(f"SLM Adapter Error: {e}")
+            logger.error(f"SLM Adapter Error: {e}")
             return {
                 "[SLM MOCK RESPONSE]": True,
                 "summary": "[SLM MOCK RESPONSE] SLM(로컬 LLM) 연결 또는 추론에 실패했습니다. LM Studio가 포트 1234에서 실행 중인지 확인하세요.",

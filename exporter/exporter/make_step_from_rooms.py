@@ -256,7 +256,8 @@ def export_step_from_rooms(rooms_json: str, out_step: str):
     doc.recompute()
 
     Part.export([model], out_step)
-    print("saved:", out_step)
+    import logging
+    logging.getLogger(__name__).info("saved: %s", out_step)
 
 if __name__ == "__main__":
     rooms_json = os.environ.get("ROOMS_JSON", r"out\page0_rooms.json")

@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL PRIMARY KEY,
   email TEXT UNIQUE,
   company_name TEXT,
+  -- SP2/A-5: 결제 게이트웨이 런타임 사용 컬럼 (app/services/payment.py)
+  plan_type TEXT NOT NULL DEFAULT 'free' CHECK (plan_type IN ('free', 'single', 'basic', 'pro')),
+  credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0),
+  stripe_subscription_id TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
@@ -46,9 +50,19 @@ CREATE TABLE IF NOT EXISTS public.projects (
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'error')),
   ifc_url TEXT,
   error_message TEXT,
+  -- SP2/A-5: 인시던트·컴플라이언스 소견 등 확장 메타데이터 저장 (endpoints.py)
+  metadata JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- SP2/A-5: 기존 배포 환경용 멱등 마이그레이션 (신규 설치는 CREATE TABLE에 이미 반영됨)
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS plan_type TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS credits INTEGER;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+UPDATE public.profiles SET plan_type = 'free' WHERE plan_type IS NULL;
+UPDATE public.profiles SET credits = 0 WHERE credits IS NULL;
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS metadata JSONB;
 
 -- Enable RLS
 ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;

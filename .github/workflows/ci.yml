@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ENV: test
+      SUPABASE_JWT_SECRET: ci-test-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile gate
+        run: python -m compileall parser compliance core harness takeoff pricing exporter app -q
+
+      - name: Unit / Integration tests
+        run: python -m pytest tests/ -q
+
+      # SP4/H-4: 진위 검증형 벤치마크 게이트 (도메인 60% 미달·상수 점수 대입 시 실패)
+      - name: Validation matrix v2 (100-point honest benchmark)
+        run: python verify_100_matrix.py
+
+  # TypeScript 프론트 게이트는 web/ 의존성 설치 구조 정리 후 추가 예정 (부록 C 후속-4)

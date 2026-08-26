@@ -1,5 +1,9 @@
 import fitz  # PyMuPDF
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def detect_pdf_type(pdf_path):
     doc = fitz.open(pdf_path)
     
@@ -54,6 +58,6 @@ if __name__ == "__main__":
     import json
     if len(sys.argv) > 1:
         result = detect_pdf_type(sys.argv[1])
-        print(json.dumps(result, indent=2))
+        logger.info(json.dumps(result, indent=2))
     else:
-        print("Usage: python parser/pdf_type.py <pdf_path>")
+        logger.info("Usage: python parser/pdf_type.py <pdf_path>")

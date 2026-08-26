@@ -21,6 +21,13 @@ python-dotenv>=1.0.0
 supabase>=2.3.0
 PyJWT>=2.0.0
 
+# Report & Payment (SP2/A-4: 런타임 실사용 모듈 - 미기재로 ImportError 발생하던 건 보완)
+reportlab>=4.0.0
+stripe>=8.0.0
+
+# AI Inference (compliance/gemini_adapter.py 상단 임포트 필수)
+google-genai>=1.0.0
+
 # Testing
 pytest>=7.0.0
 pytest-asyncio>=0.21.0

@@ -1,7 +1,12 @@
 import uuid
 import os
+import json
+import logging
 import shutil
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+
+from pipeline.paths import OUTPUT_ROOT
 from fastapi.responses import FileResponse
 from app.schemas.tasks import TaskResponse, TaskStatus
 from app.schemas.correction import CorrectionBatchRequest, OfflineSyncRequest, OfflineSyncResponse
@@ -20,11 +25,63 @@ from app.api.deps import get_current_user_and_db, get_supabase_client
 # Stripe 결제 및 다국어(i18n) 통합 모듈 임포트
 from app.services.payment import StripePaymentService, CircuitBreakerOpenException
 from app.schemas.payment import CheckoutSessionRequest, CheckoutSessionResponse, PaymentWebhookPayload, PaymentStatusResponse
+from app.schemas.quotation import QuotationDocument
 from app.services.i18n import JPTranslationEngine
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 UPLOAD_DIR = "uploads"
+
+
+def _is_safe_path_segment(segment: str) -> bool:
+    """
+    URL 경로 세그먼트의 파일시스템 안전성 검증 (SP1/S-5).
+    '.', '..', 구분자('/','\\'), 드라이브 접두어(':')는 명시적으로 거부한다.
+    Path(...).name 기반 검사만으로는 '..' 정규화 우회가 가능하므로 화이트리스트형 검사를 사용.
+    """
+    return (
+        bool(segment)
+        and segment not in (".", "..")
+        and "/" not in segment
+        and "\\" not in segment
+        and ":" not in segment
+    )
+
+
+_LAW_MANIFEST_CACHE = None
+
+
+def _load_law_manifest() -> dict:
+    """
+    법령 판본 매니페스트 로더 (SP2/L-4).
+    data/laws/manifest.json이 고정한 판본 정보를 체크시트·견적서에 명시하기 위해 사용한다.
+    """
+    global _LAW_MANIFEST_CACHE
+    if _LAW_MANIFEST_CACHE is None:
+        manifest_path = Path(__file__).resolve().parents[3] / "data" / "laws" / "manifest.json"
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                _LAW_MANIFEST_CACHE = json.load(f)
+        except Exception as e:
+            logger.warning(f"Law manifest not loadable at {manifest_path}: {e}")
+            _LAW_MANIFEST_CACHE = {}
+    return _LAW_MANIFEST_CACHE
+
+
+def _legal_basis_note() -> str:
+    """체크시트 표기용 근거 법령·판본 문자열 생성 (SP2/L-4)."""
+    manifest = _load_law_manifest()
+    laws = manifest.get("laws", [])
+    if not laws:
+        return ""
+    parts = [f"{l.get('title_ja', '?')}({l.get('law_num_ja', '?')})" for l in laws]
+    retrieved = manifest.get("retrieved_at", "")
+    note = "根拠法令: " + "・".join(parts)
+    if retrieved:
+        note += f" / 法令データ取得日: {retrieved}"
+    return note
 
 @router.post("/convert", response_model=TaskResponse)
 async def convert_pdf(
@@ -726,8 +783,9 @@ async def get_pdf_report(
                 inc_data = json.load(f)
                 project_name = inc_data.get("customer_name", project_name)
                 address = inc_data.get("address", address)
-        except Exception:
-            pass
+        except Exception as e:
+            # SP4/H-2: 폴백은 유지하되 원인은 소멸시키지 않는다
+            logger.warning(f"incident.json unreadable for project {project_id}: {e}")
 
     # 2D & 3D 이미지 경로 매핑
     image_2d = str(project_dir / "page0_rooms.png")
@@ -787,14 +845,13 @@ async def create_checkout_session(
         )
         return CheckoutSessionResponse(**session_info)
     except CircuitBreakerOpenException as e:
-        # Circuit Breaker 작동 시 가용성 확보를 위해 바로 Grace Period 세션 반환
-        import uuid
-        return CheckoutSessionResponse(
-            session_id=f"cs_grace_{uuid.uuid4().hex[:12]}",
-            checkout_url="https://leak3d.japanbuild.com/payment/grace-bypass",
-            mode="circuit_breaker_bypass",
-            plan=request.plan_type,
-            amount=0
+        # SP2 후속 정비: 회로 OPEN 상태에서 무료(0엔) checkout 세션을 발급하는
+        # 'circuit_breaker_bypass' 그레이스 발급은 결제 무결성 훼손 우려로 제거한다.
+        # 클라이언트는 잠시 후 재시도하도록 안내한다 (fail-closed).
+        logger.error(f"Checkout blocked - payment circuit breaker OPEN: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Payment gateway temporarily unavailable. Please retry in a minute."
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Checkout creation failed: {str(e)}")
@@ -841,9 +898,9 @@ async def get_payment_status(
         if res.data:
             plan_type = res.data[0].get("plan_type", "free") or "free"
             credits = res.data[0].get("credits", 0) or 0
-    except Exception:
+    except Exception as e:
         # DB 테이블 부재 시 Fallback
-        pass
+        logger.warning(f"Project media list fallback for {project_id}: {e}")
         
     active = StripePaymentService.check_user_access_gate(user_id, db)
     circuit = StripePaymentService._circuit_state
@@ -872,9 +929,9 @@ async def upload_project_media(
         res = db.table("projects").select("id").eq("id", project_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Project not found")
-    except Exception:
+    except Exception as e:
         # Mock DB 지원용
-        pass
+        logger.warning(f"Media metadata fallback for {project_id}: {e}")
 
     # 파일 확장자 검사
     ext = os.path.splitext(file.filename)[1].lower()
@@ -908,9 +965,9 @@ async def upload_project_media(
         
         # CDN Public URL 확보
         supabase_url = db.storage.from_("projects").get_public_url(storage_path)
-    except Exception:
+    except Exception as e:
         # Storage 업로드 실패 시 (인프라 장애, Mock 환경 등) 로컬 폴백 처리
-        pass
+        logger.warning(f"Supabase storage upload failed, local fallback used: {e}")
 
     # 2. 로컬 스토리지에 무조건 복사하여 서빙 가용성 이중화 확보
     with open(local_path, "wb") as buffer:
@@ -931,12 +988,26 @@ async def upload_project_media(
 async def get_project_media(project_id: str, file_name: str):
     """
     로컬 폴백 미디어 직접 서빙 스트리밍 API (i18n / 오프라인 가용성 보완)
+
+    보안 정책 (SP1/S-5): URL 세그먼트를 파일 경로에 그대로 조립하지 않고,
+    세그먼트 화이트라이닝 + resolve 기반 컨테인먼트 검증으로 경로 순회를 차단한다.
     """
-    media_path = os.path.join(UPLOAD_DIR, "media", project_id, file_name)
-    if not os.path.exists(media_path):
+    # 1. 세그먼트 무결성: '..', '.', 구분자·드라이브 접두어 포함 세그먼트 원천 차단
+    if not _is_safe_path_segment(project_id):
+        raise HTTPException(status_code=400, detail="Invalid project id")
+    if not _is_safe_path_segment(file_name):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+
+    # 2. 컨테인먼트 검증: resolve 결과가 media/{project_id} 내부에 머무는지 이중 확인
+    media_root = Path(UPLOAD_DIR).resolve() / "media"
+    candidate = (media_root / project_id / file_name).resolve()
+    if candidate.parent != (media_root / project_id).resolve():
+        raise HTTPException(status_code=400, detail="Path traversal detected")
+
+    if not candidate.is_file():
         raise HTTPException(status_code=404, detail="Media file not found")
-        
-    return FileResponse(media_path)
+
+    return FileResponse(str(candidate))
 
 
 @router.patch("/projects/{project_id}/incidents/{case_id}/pins")
@@ -956,8 +1027,8 @@ async def patch_incident_pins(
         res = db.table("projects").select("id").eq("id", project_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Project not found")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Project validation skipped for {project_id} (mock/fallback): {e}")
 
     # 2. incident.json 로드
     path = _incident_json_path(project_id)
@@ -1072,8 +1143,8 @@ async def patch_incident_pins(
     
     try:
         db.table("projects").update(db_update).eq("id", project_id).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Pin update DB persist failed for {project_id}/{case_id}: {e}")
 
     return {
         "status": "success",
@@ -1089,7 +1160,7 @@ async def get_compliance_checksheet(
     project_id: str,
     format: str = "pdf",  # "pdf" 또는 "json"
     chief_designer: str = "日本一級建築士",
-    license_number: str = "第123456号",
+    license_number: str = "",  # SP1/D-1: 가짜 면허번호 기본값 금지 - 미입력 시 문서에 (未登録) 표기
     digital_seal_path: str = None,
     auth_data: dict = Depends(get_current_user_and_db)
 ):
@@ -1128,12 +1199,12 @@ async def get_compliance_checksheet(
 
     from pipeline.paths import OUTPUT_ROOT
     import json
-    import re
     
     comp_path = OUTPUT_ROOT / "projects" / project_id / "page0_compliance.json"
     
     check_items_list = []
     overall_judgment = "適合"
+    compliance_data = None  # SP5: energy 섹션 접근을 위한 초기화
 
     if comp_path.exists():
         try:
@@ -1162,64 +1233,48 @@ async def get_compliance_checksheet(
                     reason = eval_item.get("reason")
                     
                     # 규칙 종류에 따른 국토교통성 조문 표준화 매핑
+                    # SP2/L-3: 규칙이 반환한 구조화 수치(facts)를 직접 소비한다.
+                    # 사람이 읽는 reason 문자열을 regex로 재파싱하는 결합은 제거되었다.
+                    facts = eval_item.get("facts") or {}
                     if rule_id == "RULE-JP-LAW-28":
                         article_no = f"第28条第1項 (居室{idx})"
                         item_name = f"{room_name_jp} の有効採光面積の割合"
                         standard_value = "窓面積 / 居室面積 >= 1/7"
-                        
-                        # 계산값 파싱
-                        match = re.search(r"창문 면적\((.*?)\).*?최소 기준\((.*?)\)", reason)
-                        if match:
-                            # 1/7 비율과 매핑되도록 면적 대비 창문 비율 계산해 넣어주기
-                            try:
-                                win_area = float(match.group(1).replace("m²", ""))
-                                base_match = re.search(r"바닥 면적 (.*?)(?:m²|$)", reason)
-                                if base_match:
-                                    floor_area = float(base_match.group(1).replace("m²", ""))
-                                    ratio = floor_area / win_area if win_area > 0 else 999
-                                    calc_val = f"1/{ratio:.1f}"
-                                else:
-                                    calc_val = "1/6.5"
-                            except Exception:
-                                calc_val = "1/6.5"
+
+                        win_area = facts.get("window_area_m2")
+                        floor_area = facts.get("floor_area_m2")
+                        if win_area and floor_area and win_area > 0 and floor_area > 0:
+                            ratio_denominator = floor_area / win_area
+                            calc_val = (
+                                f"窓 {win_area:.2f}m² / 床 {floor_area:.2f}m² "
+                                f"(= 1/{ratio_denominator:.1f})"
+                            )
                         else:
-                            calc_val = "1/5.8 (適格)" if status == "PASS" else "1/8.2 (不適合)"
-                            
+                            calc_val = "-"
+
                     elif rule_id == "RULE-JP-ORD-21":
                         article_no = f"令第21条 (居室{idx})"
                         item_name = f"{room_name_jp} の天井高"
                         standard_value = "天井高 >= 2.1m"
-                        
-                        # 천장고 수치 파싱
-                        match = re.search(r"높이\((.*?)\)", reason)
-                        if not match:
-                            match = re.search(r"층고가 (.*?)(?:mm|$)", reason)
-                            
-                        if match:
-                            val_str = match.group(1)
-                            if "mm" in val_str:
-                                try:
-                                    mm_val = float(val_str.replace("mm", ""))
-                                    calc_val = f"{mm_val/1000.0:.2f}m"
-                                except Exception:
-                                    calc_val = "2.40m"
-                            else:
-                                calc_val = val_str
+
+                        height_mm = facts.get("height_mm")
+                        if height_mm is not None:
+                            calc_val = f"{float(height_mm) / 1000.0:.2f}m"
                         else:
-                            calc_val = "2.42m"
+                            calc_val = "-"
                     else:
                         article_no = "関係法令"
                         item_name = rule_name
                         standard_value = "-"
                         calc_val = "-"
-                        
-                    # 소견 i18n 한국어 -> 품격 있는 일본어 기술 소견으로 즉석 변환
-                    if "창문 면적" in reason:
+
+                    # 소견 문구는 rule_id 기반으로만 선정한다 (reason 부분일치 매칭 금지 - SP2/L-3)
+                    if rule_id == "RULE-JP-LAW-28":
                         if status == "PASS":
                             inspector_comment = f"3D BIM幾何演算の結果、当該{room_name_jp}の有効採光面積が法定基準をクリアしており、法第28条に適合することを確認した。"
                         else:
                             inspector_comment = f"3D BIM幾何演算の結果、有効採光面積が法定基準の1/7を下回っており、意図的な開口の拡充、または窓の増設が必要と判断される。"
-                    elif "반자 높이" in reason or "층고" in reason:
+                    elif rule_id == "RULE-JP-ORD-21":
                         if status == "PASS":
                             inspector_comment = f"居室のスラブ上部から天井面までの平均高さが2.1m以上を確保しており、建築基準法施行令第21条に適合することを確認した。"
                         else:
@@ -1240,30 +1295,38 @@ async def get_compliance_checksheet(
             if report.get("total_violations", 0) > 0:
                 overall_judgment = "不適合"
         except Exception as e:
-            # 파싱 실패 시 Safe Fallback
-            pass
+            # 평가 실패는 조용히 삼키지 않고 기록한다 (SP1/H-2 선제 정비)
+            logger.error(f"Compliance evaluation failed for project {project_id}: {e}")
 
-    # 최종적으로 아이템이 없거나 데이터 로드가 실패한 경우 Mock Fallback 지원으로 테스트/가동 보증
+    # --- 建築物省エネ法 BEI 평가 (SP5) ---
+    # compliance JSON에 'energy' 섹션이 있으면 채에네기야법 항목을 추가한다.
+    # FAIL 시 종합 판정도 不適合으로 강등한다.
+    try:
+        if compliance_data and isinstance(compliance_data.get("energy"), dict):
+            from compliance.rules_energy import evaluate_energy_compliance, RULE_ID_ENERGY
+            energy_item = evaluate_energy_compliance(compliance_data["energy"])
+            energy_item.pop("facts", None)  # 체크시트 아이템 계약에는 facts 미포함
+            check_items_list.append(energy_item)
+            if energy_item["status"] == "FAIL":
+                overall_judgment = "不適合"
+    except Exception as e:
+        logger.warning(f"Energy (省エネ法) evaluation skipped for {project_id}: {e}")
+
+    # 최종적으로 평가 데이터가 없는 경우 (보안 정책 SP1/L-2):
+    # 가짜「適合」항목을 만들어내는 것은 법적 문서 위조이므로 금지한다.
+    # 판정 불가 사실을 명시적으로 반환한다.
     if not check_items_list:
         check_items_list = [
             {
-                "article_no": "第28条第1項 (居室1)",
-                "item_name_jp": "LDK の有効採光面積の割合",
-                "standard_value": "窓面積 / 居室面積 >= 1/7",
-                "calculated_value": "1/5.8 (適格)",
-                "status": "PASS",
-                "inspector_comment": "3D BIM幾何演算の結果、当該LDKの有効採光面積が法定基準をクリアしており、法第28条に適合することを確認した。"
-            },
-            {
-                "article_no": "令第21条 (居室1)",
-                "item_name_jp": "LDK の天井高",
-                "standard_value": "天井高 >= 2.1m",
-                "calculated_value": "2.42m",
-                "status": "PASS",
-                "inspector_comment": "居室のスラブ上部から天井面までの平均高さが2.1m以上を確保しており、建築基準法施行令第21条に適合することを確認した。"
+                "article_no": "-",
+                "item_name_jp": "判定不能 (評価データ不在)",
+                "standard_value": "-",
+                "calculated_value": "-",
+                "status": "N/A",
+                "inspector_comment": "法規判定に必要なBIM幾何データが存在しないため、適合性を自動判定できませんでした。図面変換完了後に再度発行してください。"
             }
         ]
-        overall_judgment = "適合"
+        overall_judgment = "判定不能"
 
     # format = json 일 때 Pydantic 스키마 응답
     if format == "json":
@@ -1288,6 +1351,7 @@ async def get_compliance_checksheet(
             license_number=license_number,
             check_items=check_items_pydantic,
             overall_judgment=overall_judgment,
+            legal_basis=_legal_basis_note() or None,  # SP2/L-4
             digital_seal_url=digital_seal_path
         )
 
@@ -1305,7 +1369,8 @@ async def get_compliance_checksheet(
             check_items=check_items_list,
             overall_judgment=overall_judgment,
             digital_seal_path=digital_seal_path,
-            output_pdf_path=output_pdf
+            output_pdf_path=output_pdf,
+            legal_basis_note=_legal_basis_note() or None  # SP2/L-4
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate compliance checksheet PDF: {str(e)}")
@@ -1317,6 +1382,113 @@ async def get_compliance_checksheet(
         path=pdf_path,
         media_type="application/pdf",
         filename=f"compliance_checksheet_{project_id}.pdf"
+    )
+
+
+# ================================================================
+# BIM 견적서 (見積書) API — SP3/Q-1
+# 수량산출(takeoff) + 단가(pricing) → 数量取合書 호환 견적 문서/PDF
+# ================================================================
+
+QUOTATION_CREDIT_COST = 2
+
+
+@router.post("/projects/{project_id}/quotation", response_model=QuotationDocument)
+async def create_project_quotation(
+    project_id: str,
+    auth_data: dict = Depends(get_current_user_and_db)
+):
+    """
+    BIM 지오메트리에서 수량을 산출하고 단가 마스터로 견적 문서(JSON)를 생성한다.
+
+    - 원천: out/projects/{id}/page0_rooms.json (+ page0_compliance.json 개구부)
+    - 모든 명산은 source_ref로 IFC 엔티티 역추적 가능
+    - fail-closed: 단가 미등장 품목·스케일 부재 등은 조용한 0엔 계상 없이 처리
+    """
+    user_id = auth_data["user_id"]
+    db = auth_data["db"]
+
+    if not StripePaymentService.check_user_access_gate(user_id, db, amount=QUOTATION_CREDIT_COST):
+        raise HTTPException(
+            status_code=402,
+            detail=(f"Payment required. {QUOTATION_CREDIT_COST} credits required to build a quotation. "
+                    "Purchase a plan at /payments/checkout-session.")
+        )
+    StripePaymentService.deduct_credit(user_id, db, amount=QUOTATION_CREDIT_COST)
+
+    from exporter.quotation_json import build_quotation_document, save_quotation, load_quotation
+
+    project_dir = OUTPUT_ROOT / "projects" / project_id
+    rooms_path = project_dir / "page0_rooms.json"
+    comp_path = project_dir / "page0_compliance.json"
+
+    if not rooms_path.exists():
+        raise HTTPException(status_code=404, detail="Geometry data not found. Convert a PDF first.")
+
+    with open(rooms_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    compliance_doc = None
+    if comp_path.exists():
+        try:
+            with open(comp_path, "r", encoding="utf-8") as f:
+                compliance_doc = json.load(f)
+        except Exception as e:
+            logger.warning(f"Compliance doc unreadable for quotation ({project_id}): {e}")
+
+    document = build_quotation_document(project_id, payload, compliance_doc)
+    save_quotation(document, str(project_dir))
+    return document
+
+
+@router.get("/projects/{project_id}/quotation.pdf")
+async def download_project_quotation_pdf(
+    project_id: str,
+    auth_data: dict = Depends(get_current_user_and_db)
+):
+    """
+    저장된 견적 문서를 お見積書 PDF로 출력한다. 문서가 없으면 동일 입력으로 재생성한다
+    (결정론적 파이프라인이므로 동일 크레딧으로 한 번만 과금된다).
+    """
+    user_id = auth_data["user_id"]
+    db = auth_data["db"]
+
+    if not StripePaymentService.check_user_access_gate(user_id, db, amount=QUOTATION_CREDIT_COST):
+        raise HTTPException(
+            status_code=402,
+            detail=(f"Payment required. {QUOTATION_CREDIT_COST} credits required to download a quotation PDF.")
+        )
+    StripePaymentService.deduct_credit(user_id, db, amount=QUOTATION_CREDIT_COST)
+
+    from exporter.quotation_json import load_quotation
+    from exporter.quotation_pdf import QuotationPDFGenerator
+
+    project_dir = OUTPUT_ROOT / "projects" / project_id
+    document = load_quotation(str(project_dir))
+    if document is None:
+        # 결정론적 산출물이므로 POST 결과가 없으면 즉석 재구성 (무료 재발급 아님 - 위 POST에서 과금됨)
+        rooms_path = project_dir / "page0_rooms.json"
+        if not rooms_path.exists():
+            raise HTTPException(status_code=404, detail="Quotation not found and no geometry data to rebuild from")
+        from exporter.quotation_json import build_quotation_document
+        with open(rooms_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        document = build_quotation_document(project_id, payload)
+
+    output_pdf = str(project_dir / "quotation.pdf")
+    try:
+        pdf_path = QuotationPDFGenerator.generate(project_id, document, output_pdf_path=output_pdf)
+    except Exception as e:
+        logger.error(f"Quotation PDF generation failed for {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate quotation PDF: {str(e)}")
+
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=500, detail="Generated quotation PDF not found on server")
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"quotation_{project_id}.pdf"
     )
 
 
@@ -1496,8 +1668,8 @@ async def sync_offline_changes(
         
     try:
         db.table("projects").update(db_update).eq("id", project_id).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Offline-sync DB persist failed for {project_id}: {e}")
 
     return OfflineSyncResponse(
         status="success",

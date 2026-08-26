@@ -2,6 +2,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class LawXMLParser:
     """
     e-Gov 법령 XML을 파싱하여 계층형 구조와 메타데이터를 유지한 채 RAG용 청크로 분할합니다.
@@ -180,17 +184,17 @@ if __name__ == "__main__":
     
     test_file = Path("e:/project/cad_saas_mvp/data/laws/325AC0000000201.xml")
     if test_file.exists():
-        print(f"Testing parser on: {test_file}")
+        logger.info(f"Testing parser on: {test_file}")
         parser = LawXMLParser(test_file)
-        print(f"Law Title: {parser.law_title}")
+        logger.info(f"Law Title: {parser.law_title}")
         chunks = parser.parse_articles()
-        print(f"Parsed {len(chunks)} articles.")
+        logger.info(f"Parsed {len(chunks)} articles.")
         if chunks:
-            print("\n--- First Parsed Chunk Sample ---")
+            logger.info("\n--- First Parsed Chunk Sample ---")
             sample = chunks[0]
-            print(f"ID: {sample['id']}")
-            print(f"Metadata: {sample['metadata']}")
-            print("Content:")
-            print(sample['content'])
+            logger.info(f"ID: {sample['id']}")
+            logger.info(f"Metadata: {sample['metadata']}")
+            logger.info("Content:")
+            logger.info(sample['content'])
     else:
-        print(f"Test file not found: {test_file}")
+        logger.info(f"Test file not found: {test_file}")

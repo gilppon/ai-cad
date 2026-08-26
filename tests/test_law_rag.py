@@ -1,10 +1,12 @@
 import pytest
 from pathlib import Path
 from compliance.rag.parser import LawXMLParser
-from compliance.rag.retriever import retrieve_relevant_laws
+from compliance.rag.retriever import retrieve_relevant_laws, DB_PATH
 from compliance.rag.prompts import build_slm_prompt
 
-LAWS_DIR = Path("e:/project/cad_saas_mvp/data/laws")
+# SP2/A-3: 구 저장소(e:/project/cad_saas_mvp) 경로 제거 - 저장소 내부 data/laws 사용
+from pipeline.paths import PROJECT_ROOT
+LAWS_DIR = PROJECT_ROOT / "data" / "laws"
 
 def test_xml_parsing_uniqueness():
     """

@@ -25,6 +25,10 @@ from parser.room_export import save_rooms_json
 from parser.preprocessing import preprocess_for_pipeline
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def save_lines_json(lines, out_dir="out", page_index=0, name="snapped"):
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{name}_page{page_index}.json")
@@ -36,7 +40,7 @@ def save_lines_json(lines, out_dir="out", page_index=0, name="snapped"):
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"page_index": int(page_index), name: data}, f, indent=2)
 
-    print(f"[STEP5] saved: {out_path} count={len(data)}")
+    logger.info(f"[STEP5] saved: {out_path} count={len(data)}")
 
 
 def save_walls_json(walls, out_dir="out", page_index=0):
@@ -50,7 +54,7 @@ def save_walls_json(walls, out_dir="out", page_index=0):
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({"page_index": int(page_index), "walls": data}, f, indent=2)
 
-    print("[STEP5] saved:", out_path, "count=", len(data))
+    logger.info("[STEP5] saved:", out_path, "count=", len(data))
 
 
 def rebuild_door_mask(out_path: Path, pno: int) -> Optional[Path]:
@@ -85,23 +89,21 @@ def rebuild_door_mask(out_path: Path, pno: int) -> Optional[Path]:
             nz = int((door > 0).sum())
             if nz > 0:
                 cv2.imwrite(str(out_door_mask), door)
-                print(
-                    "[STEP5] rebuilt door_mask (rooms diff):",
+                logger.info("[STEP5] rebuilt door_mask (rooms diff):",
                     str(out_door_mask),
                     "min/max=",
                     int(door.min()),
                     int(door.max()),
                     "nonzero=",
-                    nz,
-                )
+                    nz,)
                 return out_door_mask
             else:
-                print("[STEP5] rooms-diff door_mask is empty -> fallback to walls-based mask")
+                logger.info("[STEP5] rooms-diff door_mask is empty -> fallback to walls-based mask")
         else:
-            print("[STEP5] WARN: failed to read rooms masks -> fallback to walls-based mask")
+            logger.error("[STEP5] WARN: failed to read rooms masks -> fallback to walls-based mask")
     else:
-        print("[STEP5] rooms masks missing -> fallback to walls-based mask")
-        print("  clean exists=", clean_png.exists(), "door exists=", door_png.exists())
+        logger.info("[STEP5] rooms masks missing -> fallback to walls-based mask")
+        logger.info("  clean exists=", clean_png.exists(), "door exists=", door_png.exists())
 
     # -----------------------------
     # 2) fallback: walls_filled - walls_mask
@@ -110,23 +112,23 @@ def rebuild_door_mask(out_path: Path, pno: int) -> Optional[Path]:
     walls_filled_png = out_path / f"walls_filled_page{pno}.png"
 
     if not walls_mask_png.exists() or not walls_filled_png.exists():
-        print("[STEP5] WARN: missing walls_mask/walls_filled -> cannot build fallback door_mask")
-        print("  walls_mask exists=", walls_mask_png.exists(), "walls_filled exists=", walls_filled_png.exists())
+        logger.warning("[STEP5] WARN: missing walls_mask/walls_filled -> cannot build fallback door_mask")
+        logger.info("  walls_mask exists=", walls_mask_png.exists(), "walls_filled exists=", walls_filled_png.exists())
 
         # 마지막 수단: 빈 이미지라도 만들어두기 (STEP8에서 EMPTY로 명확히 로그)
         blank = np.zeros((512, 512), dtype=np.uint8)
         cv2.imwrite(str(out_door_mask), blank)
-        print("[STEP5] wrote blank door_mask:", str(out_door_mask))
+        logger.info("[STEP5] wrote blank door_mask:", str(out_door_mask))
         return out_door_mask
 
     wm = cv2.imread(str(walls_mask_png), cv2.IMREAD_GRAYSCALE)
     wf = cv2.imread(str(walls_filled_png), cv2.IMREAD_GRAYSCALE)
 
     if wm is None or wf is None:
-        print("[STEP5] WARN: failed to read walls_mask/walls_filled")
+        logger.error("[STEP5] WARN: failed to read walls_mask/walls_filled")
         blank = np.zeros((512, 512), dtype=np.uint8)
         cv2.imwrite(str(out_door_mask), blank)
-        print("[STEP5] wrote blank door_mask:", str(out_door_mask))
+        logger.info("[STEP5] wrote blank door_mask:", str(out_door_mask))
         return out_door_mask
 
     _, bw = cv2.threshold(wm, 1, 255, cv2.THRESH_BINARY)
@@ -144,15 +146,13 @@ def rebuild_door_mask(out_path: Path, pno: int) -> Optional[Path]:
 
     nz = int((door > 0).sum())
     cv2.imwrite(str(out_door_mask), door)
-    print(
-        "[STEP5] rebuilt door_mask (walls diff):",
+    logger.info("[STEP5] rebuilt door_mask (walls diff):",
         str(out_door_mask),
         "min/max=",
         int(door.min()),
         int(door.max()),
         "nonzero=",
-        nz,
-    )
+        nz,)
 
     return out_door_mask
 
@@ -194,7 +194,7 @@ def extract_room_result_from_page(
     
     preprocessed_png = out_path / f"preprocessed_page{pno}.png"
     cv2.imwrite(str(preprocessed_png), processed_gray)
-    print(f"[STEP5] preprocessed: angle={desk_angle:.2f}" if "desk_angle" in locals() else f"[STEP5] preprocessed: angle={deskew_angle:.2f}")
+    logger.info(f"[STEP5] preprocessed: angle={desk_angle:.2f}" if "desk_angle" in locals() else f"[STEP5] preprocessed: angle={deskew_angle:.2f}")
 
     # 2) Edge detection (using preprocessed binary image or deskewed gray)
     # Since processed_gray is already binary-inverted (walls are 255), 
@@ -227,12 +227,12 @@ def extract_room_result_from_page(
     merged2 = merge_parallel_pairs(merged, dist_tol=12.0)
 
     snapped = snap_endpoints(merged2, snap_dist=12.0)
-    print("DBG sample snapped[0]:", snapped[0] if snapped else None)
+    logger.info("DBG sample snapped[0]:", snapped[0] if snapped else None)
     save_lines_json(snapped, out_dir=str(out_path), page_index=pno, name="snapped")
 
     # 5) axis filter
     walls = filter_axis_aligned(snapped, tol_deg=7.0)
-    print("walls(after axis filter):", len(walls))
+    logger.info("walls(after axis filter):", len(walls))
 
     # 6) structural wall filter
     walls = filter_structural_walls(
@@ -241,7 +241,7 @@ def extract_room_result_from_page(
         min_degree=1,
         join_tol=18,
     )
-    print("walls(after structural filter):", len(walls))
+    logger.info("walls(after structural filter):", len(walls))
 
     # 6.5) walls json for STEP7/8
     save_walls_json(walls, out_dir=str(out_path), page_index=pno)
@@ -279,7 +279,7 @@ def extract_room_result_from_page(
         },
     )
 
-    print(f"[extract_room_result_from_page] rooms: {len(room_res.rooms)}")
+    logger.info(f"[extract_room_result_from_page] rooms: {len(room_res.rooms)}")
 
     # 부가 데이터: 파이프라인 카운트를 debug에 추가 (리포트용)
     room_res.debug["_pipeline_counts"] = json.dumps({
@@ -347,7 +347,7 @@ def extract_outlines_from_image_pdf(
                 },
             },
         )
-        print("saved:", rooms_json_path)
+        logger.info("saved:", rooms_json_path)
 
         # door_mask (primary + fallback)
         rebuild_door_mask(out_path, pno)
@@ -370,10 +370,10 @@ def extract_outlines_from_image_pdf(
         report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         reports.append(report)
 
-        print("counts:", report["counts"])
-        print("Saved:")
+        logger.info("counts:", report["counts"])
+        logger.info("Saved:")
         for k, v in report["files"].items():
-            print(" -", v)
+            logger.info(" -", v)
 
     return {
         "pdf_type": "image",
@@ -413,7 +413,7 @@ def main():
 
     # 상대경로면 루트 기준으로
     pdf_path_abs = str((root / pdf_path).resolve()) if not os.path.isabs(pdf_path) else pdf_path
-    print("[STEP5] pdf_path =", pdf_path, "->", pdf_path_abs)
+    logger.info("[STEP5] pdf_path =", pdf_path, "->", pdf_path_abs)
 
     extract_outlines_from_image_pdf(pdf_path_abs, out_dir=str(out_dir), page_limit=1)
 

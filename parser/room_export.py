@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from dataclasses import asdict
@@ -10,18 +11,27 @@ from domain.models import Point, Room, RoomKind
 from pipeline.contracts import build_geometry_payload, build_processing_metadata
 from pipeline.paths import resolve_output_path, resolve_project_path
 
+logger = logging.getLogger(__name__)
+
 
 def run_freecad_step(rooms_json_path: str, out_step_path: str) -> None:
     """
-    Runs an external FreeCAD script to convert room geometry to STEP.
+    Runs an external FreeCAD script to convert room geometry to STEP. (SP2/A-6)
+
+    - 실행 바이너리는 FREECADCMD_PATH 환경변수로 오버라이드 가능 (기본값: Windows 표준 설치 경로)
+    - 바이너리 또는 워커 스크립트가 없으면 조용히 건너뛰고 사유를 로깅한다 (호출부 장애 유발 금지)
     """
-    freecadcmd = r"C:\Program Files\FreeCAD 1.0\bin\Freecadcmd.exe"
+    freecadcmd = os.getenv("FREECADCMD_PATH", r"C:\Program Files\FreeCAD 1.0\bin\Freecadcmd.exe")
     script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "exporter", "freecad_rooms_to_step.py"))
     rooms_json = resolve_project_path(rooms_json_path)
     out_step = resolve_output_path(out_step_path)
 
+    if not os.path.exists(script):
+        logger.warning("[STEP Export] Worker script missing: %s. Skipping STEP export.", script)
+        return
+
     if not os.path.exists(freecadcmd):
-        print(f"[Warning] FreeCAD not found at {freecadcmd}. Skipping STEP export.")
+        logger.warning("[STEP Export] FreeCAD not found at %s (set FREECADCMD_PATH to override). Skipping STEP export.", freecadcmd)
         return
 
     env = os.environ.copy()
@@ -29,9 +39,12 @@ def run_freecad_step(rooms_json_path: str, out_step_path: str) -> None:
     env["OUT_STEP"] = str(out_step)
 
     try:
-        subprocess.run([freecadcmd, script], check=True, env=env)
+        subprocess.run([freecadcmd, script], check=True, env=env, timeout=120)
     except subprocess.CalledProcessError as e:
-        print(f"[Error] FreeCAD export failed: {e}")
+        logger.error(f"[STEP Export] FreeCAD export failed: {e}")
+        raise
+    except subprocess.TimeoutExpired:
+        logger.error("[STEP Export] FreeCAD export timed out after 120s")
         raise
 
 
@@ -185,11 +198,11 @@ def save_rooms_json(
         before = len(payload.get("rooms", []))
         payload = detect_and_refine_rooms(payload, refinement_context=refinement_context)
         after = len(payload.get("rooms", []))
-        print(f"[Refine] Rooms: {before} -> {after} (refined={payload.get('refined', False)})")
+        logger.info(f"[Refine] Rooms: {before} -> {after} (refined={payload.get('refined', False)})")
     except ImportError:
-        print("[Refine] rooms_pipeline not found, skipping refinement.")
+        logger.info("[Refine] rooms_pipeline not found, skipping refinement.")
     except Exception as e:
-        print(f"[Refine] Error during refinement: {e}")
+        logger.error(f"[Refine] Error during refinement: {e}")
 
     with open(out_json_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=indent, ensure_ascii=ensure_ascii)

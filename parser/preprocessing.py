@@ -2,6 +2,10 @@ import cv2
 import numpy as np
 from typing import Tuple, Dict, Any
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def denoise_image(image: np.ndarray) -> np.ndarray:
     """
     Remove noise from the image while preserving edges as much as possible.
@@ -104,4 +108,4 @@ if __name__ == "__main__":
         if img is not None:
             res = preprocess_for_pipeline(img)
             cv2.imwrite("debug_preprocessed.png", res["processed"])
-            print(f"Preprocessed: angle={res['deskew_angle']:.2f}")
+            logger.info(f"Preprocessed: angle={res['deskew_angle']:.2f}")

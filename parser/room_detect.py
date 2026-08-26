@@ -10,6 +10,10 @@ import numpy as np
 # -----------------------------
 # Data structures
 # -----------------------------
+import logging
+
+logger = logging.getLogger(__name__)
+
 @dataclass
 class Room:
     id: int
@@ -343,5 +347,5 @@ def detect_rooms(
     pdf_page = doc[page]
     room_result = extract_room_result_from_page(pdf_page, page, out_path, pdf_path=pdf_path)
 
-    print(f"[detect_rooms] PDF={Path(pdf_path).name} page={page} rooms={len(room_result.rooms)}")
+    logger.info(f"[detect_rooms] PDF={Path(pdf_path).name} page={page} rooms={len(room_result.rooms)}")
     return room_result

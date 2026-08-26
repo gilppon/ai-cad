@@ -1,9 +1,12 @@
+import logging
 import os
 import shutil
 from pathlib import Path
 from app.worker.celery_app import celery_app
 from core.engine import PipelineEngine
 from app.api.deps import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 @celery_app.task(bind=True, name="process_pdf_task")
 def process_pdf_task(self, file_path: str, project_id: str):
@@ -55,8 +58,9 @@ def process_pdf_task(self, file_path: str, project_id: str):
                 "status": "error",
                 "error_message": error_msg
             }).eq("id", project_id).execute()
-        except:
-            pass # Failsafe
+        except Exception as db_err:
+            # SP4/H-2: 실패 원인을 소멸시키지 않고 반드시 기록한다
+            logger.error(f"[Task {project_id}] Failed to persist error state to DB: {db_err}")
             
         return {
             "status": "failed",

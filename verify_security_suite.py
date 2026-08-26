@@ -17,39 +17,42 @@ from engine.domain.models import CADPrimitive3D, RoomGeometry, FloorplanDocument
 from engine.harness.context_firewall import ContextFirewall
 
 def test_sandbox_exporters():
-    print("[TEST 1] Testing FreeCAD / C-Extension Sandbox Process Isolation...")
-    runner = SandboxExporterRunner(timeout_seconds=5.0)
+    print("[TEST 1] Testing Sandbox Process Isolation (Real ifcopenshell IFC export)...")
+    runner = SandboxExporterRunner(timeout_seconds=60.0)
 
-    step_script = os.path.join(os.path.dirname(__file__), "engine", "exporters", "export_step.py")
-    ifc_script = os.path.join(os.path.dirname(__file__), "engine", "exporters", "export_ifc.py")
+    # SP2/A-2: 가짜 스텁 제거 - 실 ifcopenshell 워커로 격리 실행 검증
+    ifc_script = os.path.join(os.path.dirname(__file__), "engine", "exporters", "ifc_worker.py")
 
-    target_step = os.path.join(os.path.dirname(__file__), "test_model.step")
-    target_ifc = os.path.join(os.path.dirname(__file__), "test_building.ifc")
+    out_dir = os.path.join(os.path.dirname(__file__), "out", "tmp")
+    os.makedirs(out_dir, exist_ok=True)
+    target_ifc = os.path.join(out_dir, "test_building.ifc")
 
     payload = {
-        "target_path": target_step,
-        "primitives": [
-            {"type": "box", "position": [0, 1, 0], "size": [4, 2, 3], "name": "LivingWall_1"},
-            {"type": "cylinder", "position": [2, 1, 2], "size": [0.5, 0.5, 3], "name": "Column_A"}
-        ],
-        "rooms": [
-            {"room_id": "ROOM_01", "area_m2": 24.5}
-        ]
+        "target_path": target_ifc,
+        "payload": {
+            "rooms": [
+                {"id": 1, "kind": "ldk",
+                 "polygon": [{"x": 0, "y": 0}, {"x": 400, "y": 0}, {"x": 400, "y": 300}, {"x": 0, "y": 300}],
+                 "area_px2": 120000.0},
+                {"id": 2, "kind": "toilet",
+                 "polygon": [{"x": 400, "y": 0}, {"x": 600, "y": 0}, {"x": 600, "y": 200}, {"x": 400, "y": 200}],
+                 "area_px2": 40000.0}
+            ],
+            "walls": [{"id": 1, "p1": {"x": 0, "y": 0}, "p2": {"x": 600, "y": 0}}],
+            "scale": {"pixel_to_mm": 5.0},
+            "metadata": {}
+        }
     }
 
-    # 1. STEP Isolated Export
-    step_res = runner.run_isolated(step_script, payload)
-    assert step_res.get("success") is True, f"STEP export failed: {step_res}"
-    print(f"  -> STEP Sandbox Export: OK (Generated: {step_res.get('exported_file')})")
-
-    # 2. IFC Isolated Export
-    payload["target_path"] = target_ifc
+    # Isolated Real-IFC Export
     ifc_res = runner.run_isolated(ifc_script, payload)
     assert ifc_res.get("success") is True, f"IFC export failed: {ifc_res}"
-    print(f"  -> IFC Sandbox Export: OK (Generated: {ifc_res.get('exported_file')})")
+    assert os.path.exists(target_ifc), "IFC file was not generated"
+    print(f"  -> IFC Sandbox Export: OK (Generated: {ifc_res.get('exported_file')}, "
+          f"{ifc_res.get('file_size_bytes')} bytes)")
 
     # Cleanup test outputs
-    for p in (target_step, target_ifc):
+    for p in (target_ifc,):
         if os.path.exists(p):
             os.remove(p)
 

@@ -7,6 +7,10 @@ from google.genai import types
 from compliance.rag.retriever import retrieve_relevant_laws
 from compliance.rag.prompts import build_slm_prompt
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class GeminiComplianceReport(BaseModel):
     summary: str = Field(description="건축기준법 적합성 검증 의견 요약")
     action_items: List[str] = Field(description="위반 사항 해결을 위한 조치 및 권장 설계안 목록")
@@ -65,7 +69,7 @@ class GeminiAdapter:
             result = json.loads(response.text.strip())
             return result
         except Exception as e:
-            print(f"Gemini Adapter Error: {e}")
+            logger.error(f"Gemini Adapter Error: {e}")
             return {
                 "[LLM MOCK RESPONSE]": True,
                 "summary": "[LLM MOCK RESPONSE] Gemini 2.5 Flash 연결 또는 추론에 실패했습니다. GEMINI_API_KEY 환경 변수를 확인하세요.",

@@ -1,15 +1,21 @@
 import chromadb
 from typing import List, Dict, Any
-from pathlib import Path
 
-DB_PATH = Path("e:/project/cad_saas_mvp/vector_store/chromadb")
+from pipeline.paths import PROJECT_ROOT
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+# SP2/A-3: 구 저장소(e:/project/cad_saas_mvp) 하드코딩 제거 - 저장소 상대 경로로 수렴
+DB_PATH = PROJECT_ROOT / "vector_store" / "chromadb"
 
 def retrieve_relevant_laws(query_text: str, n_results: int = 3) -> List[Dict[str, Any]]:
     """
     쿼리를 입력받아 ChromaDB에서 관련 법규 조항을 검색합니다.
     """
     if not DB_PATH.exists():
-        print(f"ChromaDB not found at {DB_PATH}")
+        logger.info(f"ChromaDB not found at {DB_PATH}")
         return []
         
     client = chromadb.PersistentClient(path=str(DB_PATH))
@@ -18,7 +24,7 @@ def retrieve_relevant_laws(query_text: str, n_results: int = 3) -> List[Dict[str
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
-        print(f"Collection {collection_name} not found.")
+        logger.info(f"Collection {collection_name} not found.")
         return []
 
     results = collection.query(

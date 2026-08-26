@@ -8,6 +8,10 @@ from pipeline.contracts import build_export_metadata, build_processing_metadata
 from pipeline.paths import resolve_output_path, resolve_project_path
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def _load_json(path):
     resolved_path = resolve_project_path(path)
     with open(resolved_path, "r", encoding="utf-8") as f:
@@ -238,8 +242,8 @@ def export_step_final(
         params["door_source"] = "wall_gaps"
         doors = _derive_doors_from_wall_gaps(walls_px)
 
-    print("[STEP8] door_source:", params["door_source"], "mask_nonzero=", mask_nonzero)
-    print("[STEP8] door candidates from wall gaps:", len(doors))
+    logger.info("[STEP8] door_source:", params["door_source"], "mask_nonzero=", mask_nonzero)
+    logger.info("[STEP8] door candidates from wall gaps:", len(doors))
 
     cut_thickness = float(wall_thickness_mm) * float(cut_thickness_mul)
     cut_height = float(min(door_clearance_mm, wall_height_mm))
@@ -279,7 +283,7 @@ def export_step_final(
         })
         applied += 1
 
-    print("[STEP8] door cuts applied:", applied)
+    logger.info("[STEP8] door cuts applied:", applied)
 
     doc.recompute()
 

@@ -100,12 +100,15 @@ def get_mock_user_and_db():
     }
 
 @pytest.fixture(autouse=True)
-def setup_mocks():
+def setup_mocks(monkeypatch):
     # API Router 의존성 주입 오버라이드
     from app.api.deps import get_current_user_and_db, get_supabase_client
     app.dependency_overrides[get_current_user_and_db] = get_mock_user_and_db
     app.dependency_overrides[get_supabase_client] = lambda: GLOBAL_MOCK_DB
-    
+
+    # SP1/S-4: 서명 없는 웹훅은 기본 거부. 본 E2E 테스트에서만 명시적으로 Mock 수신 플래그 활성화
+    monkeypatch.setenv("PAYMENT_ALLOW_MOCK_WEBHOOK", "1")
+
     # 각 테스트 시작 전 DB 상태 초기화 (독립성 확보)
     GLOBAL_MOCK_DB.table("profiles")._data = [
         {"id": "user_123", "plan_type": "free", "credits": 0, "stripe_subscription_id": None}
@@ -184,10 +187,12 @@ def test_payment_gateway_and_licensing():
     assert status_data["active"] == True
 
 # ================================================================
-# 3. Circuit Breaker (장애 복원 및 Grace Period) 검증
+# 3. Circuit Breaker (장애 시 fail-closed 보호) 검증
 # ================================================================
 def test_payment_circuit_breaker_flow():
-    """Stripe API 3회 실패 시 회로를 차단(OPEN)하고 비상 Grace Period를 가동하는지 검증"""
+    """Stripe API 3회 실패 시 회로를 차단(OPEN)하고, SP1/S-3 fail-closed 정책에 따라
+    유료 접근 게이트는 무료 통과(Grace Period)가 아닌 '거부'되는지 검증한다.
+    (과금 정합성이 가용성보다 우선 - 회로 OPEN 상태에서의 무료 접근은 매출 누수)"""
     db_mock = MockSupabaseClient()
     
     # 1. 3회 연속 실패 강제 트리거
@@ -196,16 +201,13 @@ def test_payment_circuit_breaker_flow():
         
     assert StripePaymentService._circuit_state == "OPEN"
 
-    # 2. 회로 차단 상태에서 Checkout 생성 시도 -> Circuit Breaker Bypass 모드로 Grace Period 무결성 생성
-    checkout_res = client.post("/api/v1/payments/checkout-session", json={"plan_type": "pro"})
-    assert checkout_res.status_code == 200
-    checkout_data = checkout_res.json()
-    assert checkout_data["mode"] == "circuit_breaker_bypass"
-    assert checkout_data["amount"] == 0
-
-    # 3. 가드 게이트웨이 역시 비상 Grace Period 혜택으로 True 통과
+    # 2. 가드 게이트웨이는 회로 OPEN 상태에서 접근을 거부해야 한다 (fail-closed)
     access_allowed = StripePaymentService.check_user_access_gate("user_123", db_mock)
-    assert access_allowed == True
+    assert access_allowed == False
+
+    # 3. 크레딧 차감 역시 실행되지 않는다
+    deducted = StripePaymentService.deduct_credit("user_123", db_mock)
+    assert deducted == False
 
 # ================================================================
 # 4. A4 1장 일본어 PDF 누수 진단 보고서 실시간 생성 및 다국어 매핑 검증

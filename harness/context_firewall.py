@@ -1,5 +1,9 @@
 import json
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def truncate_data(data, max_len=1000):
     """
     Truncates large data (strings, lists, dicts) for safe logging and context management.
@@ -25,4 +29,4 @@ def firewall_log(label, data):
     Safe log that prevents context pollution.
     """
     safe_data = truncate_data(data)
-    print(f"[{label}] {json.dumps(safe_data, indent=2, ensure_ascii=False)}")
+    logger.info(f"[{label}] {json.dumps(safe_data, indent=2, ensure_ascii=False)}")

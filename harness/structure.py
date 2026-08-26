@@ -2,6 +2,10 @@
 from typing import List, Dict, Any
 import math
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class StructureHarness:
     """
     Validates structural integrity of the CAD model.
@@ -86,8 +90,8 @@ class StructureHarness:
 def validate_structure(payload: Dict[str, Any]) -> bool:
     harness = StructureHarness(payload)
     results = harness.check_all()
-    print(f"[*] Structural Integrity Score: {results['integrity_score']:.2f}")
+    logger.info(f"[*] Structural Integrity Score: {results['integrity_score']:.2f}")
     if results["integrity_score"] < 0.5:
-        print("[!] Warning: Low structural integrity detected.")
+        logger.error("[!] Warning: Low structural integrity detected.")
         return False
     return True

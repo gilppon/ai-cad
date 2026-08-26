@@ -25,3 +25,7 @@ artifacts/
 venv/
 .idea/
 .vscode/
+
+# Runtime artifacts (SP1-SP5)
+out/
+uploads/

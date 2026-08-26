@@ -5,6 +5,10 @@ import time
 from pathlib import Path
 
 # 설정
+import logging
+
+logger = logging.getLogger(__name__)
+
 LAWS_DIR = Path("e:/project/cad_saas_mvp/data/laws")
 LAW_TARGETS = {
     "325AC0000000201": "建築基準法 (Building Standards Act)",
@@ -19,8 +23,8 @@ def download_law(law_id: str, law_name: str, max_retries: int = 3, retry_delay: 
     url = f"{API_BASE_URL}/{law_id}"
     save_path = LAWS_DIR / f"{law_id}.xml"
     
-    print(f"[*] Starting download for '{law_name}' (ID: {law_id})...")
-    print(f"    URL: {url}")
+    logger.info(f"[*] Starting download for '{law_name}' (ID: {law_id})...")
+    logger.info(f"    URL: {url}")
     
     req = urllib.request.Request(
         url,
@@ -39,30 +43,30 @@ def download_law(law_id: str, law_name: str, max_retries: int = 3, retry_delay: 
                 with open(save_path, "wb") as f:
                     f.write(content)
                 
-                print(f"[+] Successfully downloaded and saved to: {save_path} (Size: {len(content)} bytes)")
+                logger.info(f"[+] Successfully downloaded and saved to: {save_path} (Size: {len(content)} bytes)")
                 return True
                 
         except urllib.error.HTTPError as e:
-            print(f"[-] HTTP Error (Attempt {attempt}/{max_retries}): {e.code} - {e.reason}")
+            logger.error(f"[-] HTTP Error (Attempt {attempt}/{max_retries}): {e.code} - {e.reason}")
         except urllib.error.URLError as e:
-            print(f"[-] URL Error (Attempt {attempt}/{max_retries}): {e.reason}")
+            logger.error(f"[-] URL Error (Attempt {attempt}/{max_retries}): {e.reason}")
         except Exception as e:
-            print(f"[-] Unexpected error (Attempt {attempt}/{max_retries}): {e}")
+            logger.error(f"[-] Unexpected error (Attempt {attempt}/{max_retries}): {e}")
             
         if attempt < max_retries:
-            print(f"[!] Retrying in {retry_delay} seconds...")
+            logger.error(f"[!] Retrying in {retry_delay} seconds...")
             time.sleep(retry_delay)
             
-    print(f"[x] Failed to download law '{law_name}' (ID: {law_id}) after {max_retries} attempts.")
+    logger.error(f"[x] Failed to download law '{law_name}' (ID: {law_id}) after {max_retries} attempts.")
     return False
 
 def download_all_targets():
     """
     설정된 모든 법령 목록을 순차적으로 다운로드합니다.
     """
-    print("=============================================================")
-    print("  e-Gov Law API V1 Downloader - Compliance RAG Pipeline  ")
-    print("=============================================================")
+    logger.info("=============================================================")
+    logger.info("  e-Gov Law API V1 Downloader - Compliance RAG Pipeline  ")
+    logger.info("=============================================================")
     
     success_count = 0
     for law_id, law_name in LAW_TARGETS.items():
@@ -70,9 +74,9 @@ def download_all_targets():
         if success:
             success_count += 1
             
-    print("\n=============================================================")
-    print(f"  Download Finished: {success_count}/{len(LAW_TARGETS)} succeeded.")
-    print("=============================================================")
+    logger.info("\n=============================================================")
+    logger.info(f"  Download Finished: {success_count}/{len(LAW_TARGETS)} succeeded.")
+    logger.info("=============================================================")
     
     return success_count == len(LAW_TARGETS)
 

@@ -85,7 +85,9 @@ def evaluate_project(compliance_data: Dict[str, Any]) -> Dict[str, Any]:
                 "rule_id": rule.rule_id,
                 "rule_name": rule.name,
                 "status": eval_result.get("status"),
-                "reason": eval_result.get("reason")
+                "reason": eval_result.get("reason"),
+                # SP2/L-3: 리포트 계층(regex 파싱)과 결합되지 않는 구조화 수치
+                "facts": eval_result.get("facts"),
             }
             
             if eval_result.get("status") == "FAIL":

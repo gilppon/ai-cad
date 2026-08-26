@@ -7,6 +7,10 @@ import json
 import cv2
 import numpy as np
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def _out_path(fname: str) -> str:
     base = os.path.join(os.getcwd(), "out")
     os.makedirs(base, exist_ok=True)
@@ -196,10 +200,10 @@ def detect_and_refine_rooms(
     shell_bmask = np.zeros((H, W), dtype=np.uint8)
     clusters_meta: List[dict] = []
 
-    print("[STEP3-4] out dir =", context["output_dir"])
-    print("[STEP3-4] lines_path =", lines_path, "exists=", os.path.exists(lines_path))
-    print("[STEP3-4] contours_path =", contours_path, "exists=", os.path.exists(contours_path))
-    print("[STEP3-4] render_path =", render_path, "exists=", os.path.exists(render_path))
+    logger.info("[STEP3-4] out dir =", context["output_dir"])
+    logger.info("[STEP3-4] lines_path =", lines_path, "exists=", os.path.exists(lines_path))
+    logger.info("[STEP3-4] contours_path =", contours_path, "exists=", os.path.exists(contours_path))
+    logger.info("[STEP3-4] render_path =", render_path, "exists=", os.path.exists(render_path))
 
     if os.path.exists(lines_path) and os.path.exists(contours_path):
         lines_step2 = load_snapped_lines(lines_path)
@@ -225,9 +229,9 @@ def detect_and_refine_rooms(
         with open(parallel_clusters_json_path, "w", encoding="utf-8") as f:
             json.dump(clusters_meta, f, indent=2)
 
-        print("[STEP3-4] lines loaded =", len(lines_step2), "clusters =", len(clusters_meta))
+        logger.info("[STEP3-4] lines loaded =", len(lines_step2), "clusters =", len(clusters_meta))
     else:
-        print("[STEP3-4] skipped: walls_page0.json or contours_page0.json missing")
+        logger.info("[STEP3-4] skipped: walls_page0.json or contours_page0.json missing")
 
     # ----------------------------
     # STEP3-5-0: cluster mask ensure (파일에서 로드 fallback)
@@ -240,7 +244,7 @@ def detect_and_refine_rooms(
     if cluster_mask.shape[:2] != (H, W):
         cluster_mask = cv2.resize(cluster_mask, (W, H), interpolation=cv2.INTER_NEAREST)
 
-    print("[STEP3-5] cluster_mask any =", bool(np.any(cluster_mask)))
+    logger.info("[STEP3-5] cluster_mask any =", bool(np.any(cluster_mask)))
 
     # --- 튜닝 파라미터 ---
     MIN_AREA_PX2 = 12000
@@ -335,7 +339,7 @@ def detect_and_refine_rooms(
     overlay_clean[:, :, 1] = np.maximum(overlay_clean[:, :, 1], cluster_mask_area)# green: removed
     cv2.imwrite(rooms_mask_clean_overlay_path, overlay_clean)
 
-    print("[STEP3-5] saved: rooms_mask_clean_page0.png / rooms_mask_clean_overlay_page0.png")
+    logger.info("[STEP3-5] saved: rooms_mask_clean_page0.png / rooms_mask_clean_overlay_page0.png")
    
     # ---- STEP4 anchor guard ----
     assert "rooms_mask_clean" in locals(), "STEP4 must run after STEP3-5 rooms_mask_clean is created"
@@ -416,7 +420,7 @@ def detect_and_refine_rooms(
     overlay[:, :, 1] = np.maximum(overlay[:, :, 1], door_mask_area)    # green: openings
     cv2.imwrite(rooms_mask_door_overlay_path, overlay)
 
-    print("[STEP4] openings components =", int(np.max(lab)), "saved door overlay")
+    logger.info("[STEP4] openings components =", int(np.max(lab)), "saved door overlay")
 
     # 기존 subtract 로직 유지
     
@@ -561,7 +565,7 @@ def detect_and_refine_rooms(
                     "wall_hit_ratio": wall_hit_ratio,
                 })
 
-    print("[STEP5] edges =", len(edges))
+    logger.info("[STEP5] edges =", len(edges))
 
     graph = {
         "page_index": page_index,
@@ -601,7 +605,7 @@ def detect_and_refine_rooms(
         cv2.line(ov, (int(ax), int(ay)), (int(bx), int(by)), (0, 255, 0), 3, cv2.LINE_AA)
 
     cv2.imwrite(room_graph_overlay_path, ov)
-    print("[STEP5] saved: room_graph_page0.json / room_graph_overlay_page0.png")
+    logger.info("[STEP5] saved: room_graph_page0.json / room_graph_overlay_page0.png")
     out = dict(rooms_payload)
     out["rooms"] = refined
     out["rooms_count"] = len(refined)
@@ -729,7 +733,7 @@ def detect_parallel_clusters_mask(
     return cluster_mask, clusters, shell_bmask
 
 def _load_lines_page0_json(path: str) -> List[LineSeg]:
-    print("[STEP3-4] loader: walls_page0.json")
+    logger.info("[STEP3-4] loader: walls_page0.json")
     with open(path, "r", encoding="utf-8") as f:
         d = json.load(f)
 
@@ -740,11 +744,11 @@ def _load_lines_page0_json(path: str) -> List[LineSeg]:
             x1, y1, x2, y2 = it[0], it[1], it[2], it[3]
             lines.append(LineSeg(int(x1), int(y1), int(x2), int(y2)))
 
-    print("[STEP3-4] lines loaded =", len(lines))
+    logger.info("[STEP3-4] lines loaded =", len(lines))
     return lines
 
 def load_snapped_lines(path: str) -> List[LineSeg]:
-    print("[STEP3-4] loader: snapped_page0.json")
+    logger.info("[STEP3-4] loader: snapped_page0.json")
     with open(path, "r", encoding="utf-8") as f:
         d = json.load(f)
 
@@ -755,13 +759,13 @@ def load_snapped_lines(path: str) -> List[LineSeg]:
             x1, y1, x2, y2 = it[0], it[1], it[2], it[3]
             lines.append(LineSeg(int(x1), int(y1), int(x2), int(y2)))
 
-    print("[STEP3-4] lines loaded =", len(lines))
+    logger.info("[STEP3-4] lines loaded =", len(lines))
     return lines
 
 
 
 def _load_outer_shell_from_contours(path: str) -> np.ndarray:
-    print("[STEP3-4] loader: contours_page0.json")
+    logger.info("[STEP3-4] loader: contours_page0.json")
     with open(path, "r", encoding="utf-8") as f:
         d = json.load(f)
 
@@ -770,7 +774,7 @@ def _load_outer_shell_from_contours(path: str) -> np.ndarray:
     pts = outer["points"]     # [[x,y], ...]
     poly = np.array([[int(x), int(y)] for x, y in pts], dtype=np.int32)
 
-    print("[STEP3-4] outer pts =", len(poly), "area =", outer.get("area"))
+    logger.info("[STEP3-4] outer pts =", len(poly), "area =", outer.get("area"))
     return poly
 
 
@@ -800,9 +804,9 @@ import glob
 
 def dbg_list_out_json():
     out_dir = os.path.join(os.getcwd(), "out")
-    print("[DBG] out_dir =", out_dir)
+    logger.info("[DBG] out_dir =", out_dir)
     paths = sorted(glob.glob(os.path.join(out_dir, "*.json")))
-    print("[DBG] json files:", len(paths))
+    logger.info("[DBG] json files:", len(paths))
     for p in paths:
         try:
             with open(p, "r", encoding="utf-8") as f:
@@ -811,9 +815,9 @@ def dbg_list_out_json():
             head = None
             if isinstance(data, list) and len(data) > 0:
                 head = data[0]
-            print(" -", os.path.basename(p), "type=", type(data).__name__, "len=", n, "head=", str(head)[:120])
+            logger.info(" -", os.path.basename(p), "type=", type(data).__name__, "len=", n, "head=", str(head)[:120])
         except Exception as e:
-            print(" -", os.path.basename(p), "read fail:", e)
+            logger.info(" -", os.path.basename(p), "read fail:", e)
 
 # 실행 시 1번만 호출
 
@@ -824,21 +828,21 @@ def dbg_peek_json(fname: str):
     with open(path, "r", encoding="utf-8") as f:
         d = json.load(f)
 
-    print("\n[PEEK]", fname)
-    print("type:", type(d).__name__)
+    logger.info("\n[PEEK]", fname)
+    logger.info("type:", type(d).__name__)
     if isinstance(d, dict):
-        print("keys:", list(d.keys()))
+        logger.info("keys:", list(d.keys()))
         for k in d.keys():
             v = d[k]
             if isinstance(v, list):
                 head = v[0] if len(v) else None
-                print(f" - {k}: list len={len(v)} head={str(head)[:120]}")
+                logger.info(f" - {k}: list len={len(v)} head={str(head)[:120]}")
             elif isinstance(v, dict):
-                print(f" - {k}: dict keys={list(v.keys())[:10]}")
+                logger.info(f" - {k}: dict keys={list(v.keys())[:10]}")
             else:
-                print(f" - {k}: {type(v).__name__} {str(v)[:80]}")
+                logger.info(f" - {k}: {type(v).__name__} {str(v)[:80]}")
     else:
-        print("len:", len(d))
+        logger.info("len:", len(d))
 def export_step_from_rooms(
     rooms_payload: Dict[str, Any],
     graph_path: str,
@@ -901,12 +905,12 @@ def export_step_from_rooms(
 
     # 4) Export STEP
     Part.export(doc.Objects, out_step)
-    print("[STEP6] saved:", out_step)
+    logger.info("[STEP6] saved:", out_step)
 
     # 5) Save metadata
     with open(out_meta, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
-    print("[STEP6] saved:", out_meta)
+    logger.info("[STEP6] saved:", out_meta)
 
     doc.close()
     return

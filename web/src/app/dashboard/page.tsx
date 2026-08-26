@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import ThreeDViewer from "@/components/ThreeDViewer";
 import { getLocalSession, UserSession } from "@/utils/supabase";
+import { getAuthHeaders } from "@/utils/apiAuth";
 import { API_BASE_URL } from "@/utils/api";
 
 export default function DashboardPage() {
@@ -32,11 +33,20 @@ export default function DashboardPage() {
     formData.append("file", file);
 
     try {
+      // SP1/S-2: 하드코딩 토큰 금지 - Supabase 실제 세션 토큰 사용
+      let authHeaders: Record<string, string>;
+      try {
+        authHeaders = await getAuthHeaders();
+      } catch {
+        setIsUploading(false);
+        setUploadProgress("");
+        alert("ログインセッションがありません。ログインしてください。");
+        return;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/v1/convert`, {
         method: "POST",
-        headers: {
-          "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-key"
-        },
+        headers: authHeaders,
         body: formData
       });
 

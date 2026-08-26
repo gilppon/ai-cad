@@ -7,8 +7,8 @@ class BIMComplianceCheckItem(BaseModel):
     article_no: str = Field(..., description="일본 건축기준법 조항 번호 (예: 第28条)")
     item_name_jp: str = Field(..., description="검증 항목명 (예: 居室の採光及び換気)")
     standard_value: str = Field(..., description="법령상 기준치 (예: 窓面積 / 居室面積 >= 1/7)")
-    calculated_value: str = Field(..., description="3D IFC 파싱 및 기하 연산 값 (예: 1/5.8)")
-    status: str = Field(..., description="적합성 판정 결과: PASS(O), FAIL(X)")
+    calculated_value: str = Field(..., description="3D IFC 파싱 및 기하 연산 값")
+    status: str = Field(..., description="적합성 판정 결과: PASS(O), FAIL(X), N/A(판정불능)")
     inspector_comment: str = Field(..., description="설계자 종합 소견")
 
 
@@ -16,7 +16,8 @@ class BIMComplianceChecksheet(BaseModel):
     project_id: str
     building_name: str
     chief_designer: str
-    license_number: str  # 1급 건축사 면허번호 (一級建築士 登録番号)
+    license_number: str  # 1급 건축사 면허번호 (一級建築士 登録番号) - 미입력 시 문서에 (未登録) 표기
     check_items: List[BIMComplianceCheckItem]
-    overall_judgment: str  # "適合" 또는 "不適合"
+    overall_judgment: str  # "適合" 또는 "不適合" 또는 "判定不能"
+    legal_basis: Optional[str] = None  # SP2/L-4: 근거 법령·판본 (data/laws/manifest.json 기준)
     digital_seal_url: Optional[str] = None  # 설계자 인장 이미지 URL (또는 로컬 업로드 인장 경로)

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import ThreeDViewer from "@/components/ThreeDViewer";
 import { API_BASE_URL } from "@/utils/api";
+import { getAuthHeaders } from "@/utils/apiAuth";
 
 interface Point {
   x: number;
@@ -75,9 +76,7 @@ function EditorContent() {
       try {
         // 실제 API 연동 시도 (실패 시 mock 데이터로 우아하게 대응하는 서킷 브레이커)
         const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/geometry`, {
-          headers: {
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-key"
-          }
+          headers: await getAuthHeaders()
         });
         if (res.ok) {
           const data = await res.json();
@@ -240,9 +239,9 @@ function EditorContent() {
 
       const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/correction`, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock-key"
+          ...(await getAuthHeaders())
         },
         body: JSON.stringify(payload)
       });

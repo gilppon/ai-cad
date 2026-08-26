@@ -64,8 +64,17 @@ class JPPDFGenerator:
         compliance_opinions: List[Dict[str, Any]],
         image_2d_path: str = None,
         image_3d_path: str = None,
-        output_pdf_path: str = None
+        output_pdf_path: str = None,
+        invoice_registration_number: str = None
     ) -> str:
+        # 적격청구서발행사업자(인보이스) 등록번호는 실행 파라미터 또는 환경변수로만 주입한다.
+        # 가짜 번호를 상수로 박아 넣으면 법적 문서 위조가 되므로, 미등록 시 (未登録) 으로 표기한다.
+        invoice_reg_no = (
+            invoice_registration_number
+            or os.getenv("JP_INVOICE_REGISTRATION_NUMBER", "").strip()
+            or "(未登録)"
+        )
+        
         if not output_pdf_path:
             from pipeline.paths import OUTPUT_ROOT
             output_pdf_path = str(Path(OUTPUT_ROOT) / "projects" / project_id / "page0_compliance_report.pdf")
@@ -149,7 +158,7 @@ class JPPDFGenerator:
         対象物件: {project_name}<br/>
         調査住所: {address}<br/>
         調査日時: {date_str}<br/>
-        登録番号: T1234567890123 (適格請求書発行事業者)
+        登録番号: {invoice_reg_no} (適格請求書発行事業者)
         """
         
         sign_html = f"""
@@ -324,10 +333,12 @@ class JPPDFGenerator:
         check_items: List[Dict[str, Any]],
         overall_judgment: str,
         digital_seal_path: str = None,
-        output_pdf_path: str = None
+        output_pdf_path: str = None,
+        legal_basis_note: str = None
     ) -> str:
         """
         일본 국토교통성(MLIT) 2026 가이드라인 규격 'BIM 확인신청 자가 체크시트' PDF 자동 렌더링 모듈
+        (legal_basis_note: SP2/L-4 - data/laws/manifest.json 고정 판본의 근거 법령 표기)
         """
         if not output_pdf_path:
             from pipeline.paths import OUTPUT_ROOT
@@ -407,6 +418,13 @@ class JPPDFGenerator:
         title = Paragraph("BIM確認申請セルフチェックシート<br/><font size='8'>（設計者自己確認基準に基づく自動出力表）</font>", title_style)
         story.append(title)
         
+        # 근거 법령·판본 표기 (SP2/L-4) - 판정의 법적 근거를 문서에 명시
+        if legal_basis_note:
+            story.append(Paragraph(legal_basis_note, ParagraphStyle(
+                name='CSLegalBasis', fontName='HeiseiMin-W3', fontSize=7, leading=9,
+                alignment=1, textColor=colors.HexColor('#475569'), spaceAfter=6
+            )))
+        
         # --- 2. 설계사 정보 및 날인 도장 합성 테이블 ---
         from datetime import datetime
         check_date = datetime.now().strftime("%Y年 %m月 %d日")
@@ -422,7 +440,7 @@ class JPPDFGenerator:
                 Paragraph("<b>一級建築士 (설계자)</b>", meta_label_style),
                 Paragraph(chief_designer, meta_value_style),
                 Paragraph("<b>登録番号 (면허번호)</b>", meta_label_style),
-                Paragraph(license_number, meta_value_style)
+                Paragraph(license_number or "(未登録)", meta_value_style)
             ]
         ]
         
@@ -492,23 +510,17 @@ class JPPDFGenerator:
         ]
         
         # 기본 자가진단 항목 데이터 매핑
+        # 보안 정책 (SP1/L-2): 평가 데이터가 없음에도 가짜「適合」항목을 만들어내는 것은
+        # 법적 문서 위조이므로 금지한다. 판정 불가 사실을 그대로 문서에 명시한다.
         if not check_items:
             check_items = [
                 {
-                    "article_no": "第28条第1項",
-                    "item_name_jp": "居室の有効採光面積の割合",
-                    "standard_value": "窓面積 / 居室面積 >= 1/7",
-                    "calculated_value": "1/5.8 (適格)",
-                    "status": "PASS",
-                    "inspector_comment": "3D BIM 파싱 기하 연산 결과, 유효 창 면적 비율이 1/7을 초과하여 법 제28조 채광 의무 조항을 충족함."
-                },
-                {
-                    "article_no": "令第21조",
-                    "item_name_jp": "居室の天井高 (반자 높이)",
-                    "standard_value": "天井高 >= 2.1m",
-                    "calculated_value": "2.42m (適格)",
-                    "status": "PASS",
-                    "inspector_comment": "거실 슬래브 상부에서 반자까지의 평균 높이가 2.1m 이상인 2.42m로 계측되어 시행령 제21조에 부합함."
+                    "article_no": "-",
+                    "item_name_jp": "判定不能 (評価データ不在)",
+                    "standard_value": "-",
+                    "calculated_value": "-",
+                    "status": "N/A",
+                    "inspector_comment": "法規判定に必要なBIM幾何データが存在しないため、適合性を自動判定できませんでした。図面変換完了後に再度発行してください。"
                 }
             ]
             
@@ -523,6 +535,8 @@ class JPPDFGenerator:
             # 판정 O / X 마크 데코레이션
             if status == "PASS":
                 status_html = "<font color='#DC2626'><b>〇 適合</b></font>"
+            elif status == "N/A":
+                status_html = "<font color='#64748B'><b>－ 判定不能</b></font>"
             else:
                 status_html = "<font color='#2563EB'><b>✕ 不適合</b></font>"
                 

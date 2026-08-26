@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import os
 import cv2
@@ -6,7 +7,47 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, List
 
-def apply_scale_factor(rooms_data: Dict[str, Any], px_to_m: float = 0.01) -> Dict[str, Any]:
+logger = logging.getLogger(__name__)
+
+# SP4/H-5: 레거시 폴백 스케일의 단일 정의는 core.units로 수렴 (재발 방지)
+from core.units import DEFAULT_PX_TO_M
+
+
+def resolve_px_to_m(rooms_payload: Dict[str, Any]) -> float:
+    """
+    페이로드에 기록된 파이프라인 스케일을 단일 진실원(SSOT)으로 해석한다. (SP1/L-1)
+
+    우선순위:
+      1. payload["scale"]["pixel_to_mm"]  (래스터 경로: save_rooms_json이 기록)
+      2. payload["metadata"]["px_to_m"]   (명시적 메타데이터)
+      3. DEFAULT_PX_TO_M (스케일 정보 부재 시 레거시 폴백 + 경고)
+
+    법규 판정(채광 1/7 등)은 이 값의 제곱에 비례하므로, 파이프라인과
+    컴플라이언스 계층의 스케일 불일치는 판정 오류로 직결된다.
+    """
+    scale = rooms_payload.get("scale") or {}
+    pixel_to_mm = scale.get("pixel_to_mm")
+    if pixel_to_mm:
+        try:
+            return float(pixel_to_mm) / 1000.0
+        except (TypeError, ValueError):
+            logger.warning(f"[Scale] Invalid scale.pixel_to_mm={pixel_to_mm!r}, falling back.")
+
+    metadata = rooms_payload.get("metadata") or {}
+    explicit_px_to_m = metadata.get("px_to_m")
+    if explicit_px_to_m:
+        try:
+            return float(explicit_px_to_m)
+        except (TypeError, ValueError):
+            logger.warning(f"[Scale] Invalid metadata.px_to_m={explicit_px_to_m!r}, falling back.")
+
+    logger.warning(
+        "[Scale] No scale info in payload - using legacy default %.4f m/px. "
+        "Legal area verdicts may be inaccurate.", DEFAULT_PX_TO_M
+    )
+    return DEFAULT_PX_TO_M
+
+def apply_scale_factor(rooms_data: Dict[str, Any], px_to_m: float = DEFAULT_PX_TO_M) -> Dict[str, Any]:
     """
     Applies the scale factor to geometric properties.
     px_to_m = 0.01 means 100 pixels = 1 meter.
@@ -86,9 +127,9 @@ def extract_compliance_data(rooms_payload: Dict[str, Any], output_dir: str, page
     Main entry point for Stage 2 data extraction.
     Takes the pure geometry payload and produces a structured compliance JSON.
     """
-    # 1. Apply scale
-    # Currently default to 100px = 1m (0.01)
-    scaled_payload = apply_scale_factor(rooms_payload, px_to_m=0.01)
+    # 1. Apply scale - 파이프라인이 기록한 스케일을 그대로 수용 (SP1/L-1, 하드코딩 금지)
+    px_to_m = resolve_px_to_m(rooms_payload)
+    scaled_payload = apply_scale_factor(rooms_payload, px_to_m=px_to_m)
     
     # 2. Extract Openings
     openings = extract_openings(rooms_payload, output_dir, page_index)
@@ -101,7 +142,7 @@ def extract_compliance_data(rooms_payload: Dict[str, Any], output_dir: str, page
         "page_index": page_index,
         "metrics": {
             "total_area_m2": total_area_m2,
-            "px_to_m_scale": 0.01
+            "px_to_m_scale": px_to_m
         },
         "rooms": scaled_payload.get("rooms", []),
         "openings": openings,

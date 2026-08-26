@@ -12,6 +12,10 @@ from harness.circuit_breaker import circuit_breaker
 import fitz
 from parser.text_extract import extract_text_from_page, find_room_height
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class PipelineEngine:
     """
     Main orchestration engine for the CAD SaaS MVP pipeline.
@@ -27,7 +31,7 @@ class PipelineEngine:
         """
         Processes a multi-page PDF and aggregates all floors into a single IFC.
         """
-        print(f"[*] Starting multi-page processing: {pdf_path}")
+        logger.info(f"[*] Starting multi-page processing: {pdf_path}")
         from parser.pdf_type import detect_pdf_type
         pdf_info = detect_pdf_type(pdf_path)
         page_count = pdf_info["metadata"]["page_count"]
@@ -36,7 +40,7 @@ class PipelineEngine:
         all_floor_payloads = []
         
         for i in range(page_count):
-            print(f"[*] --- Processing Page {i+1}/{page_count} ---")
+            logger.info(f"[*] --- Processing Page {i+1}/{page_count} ---")
             payload = self._extract_page_geometry(pdf_path, i, pdf_type)
             if payload:
                 all_floor_payloads.append(payload)
@@ -93,7 +97,7 @@ class PipelineEngine:
                 with open(rooms_json_path, "r", encoding="utf-8") as f:
                     payload = json.load(f)
             except Exception as e:
-                print(f"[!] Error on page {page_index}: {e}")
+                logger.error(f"[!] Error on page {page_index}: {e}")
                 return None
 
         validate_geometry_payload(payload)
@@ -101,7 +105,7 @@ class PipelineEngine:
         # Structure Integrity Check
         from harness.structure import validate_structure
         if not validate_structure(payload):
-            print(f"[!] Structural validation failed for page {page_index}")
+            logger.error(f"[!] Structural validation failed for page {page_index}")
             # We could raise an error or just flag it in metadata
             payload["metadata"] = payload.get("metadata", {})
             payload["metadata"]["integrity_warning"] = True
@@ -129,11 +133,11 @@ class PipelineEngine:
                 avg_height = sum(detected_heights) / len(detected_heights)
                 payload["metadata"] = payload.get("metadata", {})
                 payload["metadata"]["floor_height_mm"] = avg_height
-                print(f"[*] Detected floor height: {avg_height}mm (from {len(detected_heights)} rooms)")
+                logger.info(f"[*] Detected floor height: {avg_height}mm (from {len(detected_heights)} rooms)")
             
             doc.close()
         except Exception as te:
-            print(f"[!] Text extraction failed for page {page_index}: {te}")
+            logger.error(f"[!] Text extraction failed for page {page_index}: {te}")
 
         # --- Stage 2: Compliance Extraction ---
         from compliance.extractor import extract_compliance_data
@@ -246,4 +250,4 @@ if __name__ == "__main__":
     engine = PipelineEngine(project_id="test_run")
     # For testing, we might not have a real PDF, so we'll just test the flow
     # result = engine.process_pdf("sample.pdf")
-    # print(result)
+    # logger.info(result)

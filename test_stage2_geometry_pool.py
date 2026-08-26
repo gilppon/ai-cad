@@ -36,36 +36,42 @@ def test_stage2_self_intersection_healing():
     print("  [PASS] Room Detection & Self-Intersection Healing OK!")
 
 def test_stage2_worker_pool_exports():
-    print("[STAGE 2 TEST 2] Testing Subprocess Worker Pool for STEP/IFC Exports...")
+    print("[STAGE 2 TEST 2] Testing Subprocess Worker Pool for IFC4 Export (Real ifcopenshell path)...")
     pool = ExporterWorkerPool(pool_size=2, max_tasks_per_child=50)
 
-    step_script = os.path.join(os.path.dirname(__file__), "engine", "exporters", "export_step.py")
-    ifc_script = os.path.join(os.path.dirname(__file__), "engine", "exporters", "export_ifc.py")
+    # SP2/A-2: 가짜 STEP/IFC 스텁 제거. 실 ifcopenshell 워커만 검증한다.
+    # (STEP은 FreeCAD 바이너리 의존 기능으로 분리 - parser/room_export.run_freecad_step 참조)
+    ifc_script = os.path.join(os.path.dirname(__file__), "engine", "exporters", "ifc_worker.py")
 
-    target_step = os.path.join(os.path.dirname(__file__), "pool_test.step")
-    target_ifc = os.path.join(os.path.dirname(__file__), "pool_test.ifc")
+    out_dir = os.path.join(os.path.dirname(__file__), "out", "tmp")
+    os.makedirs(out_dir, exist_ok=True)
+    target_ifc = os.path.join(out_dir, "pool_test.ifc")
 
     payload = {
-        "target_path": target_step,
-        "primitives": [{"type": "box", "position": [0, 1, 0], "size": [5, 3, 4], "name": "PoolWall"}],
-        "rooms": [{"room_id": "ROOM_01", "area_m2": 30.0}]
+        "target_path": target_ifc,
+        "payload": {
+            "rooms": [{
+                "id": 1,
+                "kind": "ldk",
+                "polygon": [{"x": 0, "y": 0}, {"x": 400, "y": 0}, {"x": 400, "y": 300}, {"x": 0, "y": 300}],
+                "area_px2": 120000.0
+            }],
+            "walls": [{"id": 1, "p1": {"x": 0, "y": 0}, "p2": {"x": 400, "y": 0}}],
+            "scale": {"pixel_to_mm": 5.0},
+            "metadata": {}
+        }
     }
 
-    # Execute STEP through Worker Pool
-    res_step = pool.execute_export(step_script, payload)
-    assert res_step.get("success") is True and res_step.get("worker_pooled") is True
-    print(f"  -> Pooled STEP Export: OK (Generated: {res_step.get('exported_file')})")
-
     # Execute IFC through Worker Pool
-    payload["target_path"] = target_ifc
     res_ifc = pool.execute_export(ifc_script, payload)
-    assert res_ifc.get("success") is True and res_ifc.get("worker_pooled") is True
-    print(f"  -> Pooled IFC Export: OK (Generated: {res_ifc.get('exported_file')})")
+    assert res_ifc.get("success") is True and res_ifc.get("worker_pooled") is True, f"IFC export failed: {res_ifc}"
+    assert os.path.exists(target_ifc), "IFC file was not generated"
+    print(f"  -> Pooled IFC Export: OK (Generated: {res_ifc.get('exported_file')}, "
+          f"{res_ifc.get('file_size_bytes')} bytes)")
 
     # Cleanup
-    for p in (target_step, target_ifc):
-        if os.path.exists(p):
-            os.remove(p)
+    if os.path.exists(target_ifc):
+        os.remove(target_ifc)
 
     print("  [PASS] Worker Pool CAD Exports OK!")
 

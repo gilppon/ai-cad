@@ -128,23 +128,29 @@ class StripePaymentService:
     @classmethod
     def verify_and_apply_webhook(cls, raw_body: bytes, sig_header: Optional[str], db: Any) -> Dict[str, Any]:
         """
-        Stripe Webhook 결제 성공 이벤트를 받아 유저 라이선스 갱신.
-        운영 환경에서는 전자서명(stripe-signature)을 강제 검증하고,
-        개발 환경(development, local)에서 서명이 누락된 경우에만 Mock 우회를 허용합니다.
+        Stripe Webhook 결제 성공 이벤트를 받아 유저 라이선스 갱신. (SP1/S-4)
+
+        보안 정책 (fail-closed):
+          - 전자서명(stripe-signature)이 없는 페이로드는 ENV와 무관하게 기본 거부한다.
+          - 서명 없는 Mock 수신은 PAYMENT_ALLOW_MOCK_WEBHOOK=1 이 명시적으로 설정된
+            비운영 환경에서만 허용한다 (로컬/테스트 전용).
         """
         import json
-        is_prod = os.getenv("ENV") == "production"
-        
+        allow_unsigned_mock = os.getenv("PAYMENT_ALLOW_MOCK_WEBHOOK", "") == "1" and os.getenv("ENV") != "production"
+
+        if cls.STRIPE_WEBHOOK_SECRET in ("", "whsec_mock"):
+            logger.warning("[Security] STRIPE_WEBHOOK_SECRET is not configured; signed webhooks will be rejected.")
+
         user_id = None
         plan_type = "single"
         session_id = "mock_session"
-        
+
         if not sig_header:
-            if is_prod:
-                logger.error("[Security Alert] Stripe Webhook signature missing in production environment!")
-                return {"status": "error", "message": "Missing stripe-signature header in production"}
-            
-            # 개발/로컬 모드에서의 Mock Payload 파싱 처리
+            if not allow_unsigned_mock:
+                logger.error("[Security Alert] Stripe Webhook signature missing and PAYMENT_ALLOW_MOCK_WEBHOOK not enabled.")
+                return {"status": "error", "message": "Missing stripe-signature header"}
+
+            # 로컬/테스트 전용 Mock Payload 파싱 처리 (명시적 플래그 필요)
             try:
                 payload = json.loads(raw_body.decode("utf-8"))
                 user_id = payload.get("user_id")
@@ -224,58 +230,66 @@ class StripePaymentService:
     @classmethod
     def check_user_access_gate(cls, user_id: str, db: Any, amount: int = 1) -> bool:
         """
-        유료 기능(PDF 레포트 다운로드 및 도면 3D 자동 변환) 가드 게이트웨이.
-        요구되는 최소 크레딧(amount)을 가지고 있는지 정밀 가드.
-        Circuit Breaker가 OPEN일 시, 100% 무조건 PASS (Grace Period) 적용.
+        유료 기능(PDF 레포트 다운로드 및 도면 3D 자동 변환) 가드 게이트웨이. (SP1/S-3)
+
+        보안 정책 (fail-closed):
+          - 회로 OPEN 또는 DB 조회 실패 시 접근을 거부한다 (False).
+            유료 판정이 불가능한 상태에서 무료 접근을 허용하는 것은 매출 누수이므로,
+            가용성 확보보다 과금 정합성을 우선한다.
         """
         if cls._circuit_state == "OPEN":
-            logger.warning(f"[Circuit Breaker] Activated Grace Period Access for User ID {user_id}")
-            return True
-            
+            logger.warning(f"[Circuit Breaker] Payment circuit OPEN - access DENIED for User ID {user_id} (fail-closed)")
+            return False
+
         try:
             res = db.table("profiles").select("plan_type, credits").eq("id", user_id).execute()
             if not res.data:
                 # 프로필 정보 없으면 기본 무료 회원(크레딧0)으로 간주
                 return False
-                
+
             profile = res.data[0]
             plan = profile.get("plan_type", "free")
             credits = profile.get("credits", 0) or 0
-            
+
             # Pro 플랜은 차감 및 가드 없는 완전 무제한 패스
             if plan == "pro":
                 return True
-                
+
             if credits >= amount:
                 return True
-                
+
             return False
         except Exception as e:
-            # DB 연결 장애 등 예외 시 에러 차단 후 비상 가동 (Fault Tolerance)
-            logger.error(f"Access gate db failure fallback: {str(e)}")
-            return True
+            # DB 연결 장애 등 예외 시 접근 거부 (fail-closed)
+            logger.error(f"Access gate db failure - access DENIED for User ID {user_id}: {str(e)}")
+            return False
             
     @classmethod
     def deduct_credit(cls, user_id: str, db: Any, amount: int = 1) -> bool:
         """
-        사용자 행동에 따라 가변적인 크레딧(amount) 차감.
+        사용자 행동에 따라 가변적인 크레딧(amount) 차감. (SP1/S-3)
+
+        보안 정책 (fail-closed):
+          - 회로 OPEN 또는 DB 장애 시 차감을 실행하지 않고 False를 반환한다.
+            차감 없이 성공(True)을 반환하면 무료 소비가 발생한다.
         """
         if cls._circuit_state == "OPEN":
-            return True
-            
+            logger.warning(f"[Circuit Breaker] Payment circuit OPEN - credit deduction SKIPPED for User ID {user_id}")
+            return False
+
         try:
             res = db.table("profiles").select("plan_type, credits").eq("id", user_id).execute()
             if not res.data:
                 return False
-                
+
             profile = res.data[0]
             plan = profile.get("plan_type", "free")
             credits = profile.get("credits", 0) or 0
-            
+
             # Pro 플랜은 차감하지 않음
             if plan == "pro":
                 return True
-                
+
             if credits >= amount:
                 db.table("profiles").update({
                     "credits": credits - amount,
@@ -284,5 +298,5 @@ class StripePaymentService:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Credit deduction db failure fallback: {str(e)}")
-            return True
+            logger.error(f"Credit deduction db failure - deduction NOT applied for User ID {user_id}: {str(e)}")
+            return False

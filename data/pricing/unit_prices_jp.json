@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "currency": "JPY",
+  "valid_from": "2026-08-01",
+  "consumption_tax_rate": 0.10,
+  "common_temporary_rate": 0.15,
+  "general_admin_rate": 0.12,
+  "meta": {
+    "description": "マンション漏水修繕 공사 참고단가 초판 (SP3/Q-1). 공개 적산기준 수준의 시장 참고값이며 사업자 단가로 교체 가능. 단가 변경은 이 파일의 버전 히스토리로 관리할 것.",
+    "basis_codes": {
+      "FLOOR-AREA": "바닥 면적 m²",
+      "CEIL-AREA": "천장 면적 m²",
+      "WALL-AREA": "벽 표면적 m² (층고 × 연장)",
+      "WALL-LENGTH": "벽 순연장 m (包絡処理 보정 후)",
+      "ROOM-COUNT": "호실·부위 수 式",
+      "DOOR-COUNT": "문 개소 式",
+      "WINDOW-COUNT": "창 개소 式"
+    }
+  },
+  "work_items": [
+    { "item_code": "DEM-01", "name_ja": "既存床仕上げ材 解体撤去", "basis": "FLOOR-AREA", "unit": "m²", "unit_price": 1800, "category_work": "解体工" },
+    { "item_code": "DEM-02", "name_ja": "既存天井仕上げ材 解体撤去", "basis": "CEIL-AREA", "unit": "m²", "unit_price": 1600, "category_work": "解体工" },
+    { "item_code": "DEM-03", "name_ja": "既有壁クロス 剥ぎ撤去", "basis": "WALL-AREA", "unit": "m²", "unit_price": 900, "category_work": "解体工" },
+    { "item_code": "FIN-01", "name_ja": "長尺塩ビ床シート 貼り (クッションフロア)", "basis": "FLOOR-AREA", "unit": "m²", "unit_price": 4200, "category_work": "仕上工" },
+    { "item_code": "FIN-02", "name_ja": "天井 石膏ボード張替え + IPA塗装", "basis": "CEIL-AREA", "unit": "m²", "unit_price": 3800, "category_work": "仕上工" },
+    { "item_code": "FIN-03", "name_ja": "壁 ビニールクロス貼り", "basis": "WALL-AREA", "unit": "m²", "unit_price": 1400, "category_work": "仕上工" },
+    { "item_code": "FIN-04", "name_ja": "フローリング張替え (12mm 合板)", "basis": "FLOOR-AREA", "unit": "m²", "unit_price": 7800, "category_work": "仕上工", "part_filter": ["ldk", "bedroom"] },
+    { "item_code": "WTR-01", "name_ja": "バルコニー FRP防水 再施工 (トップコート含む)", "basis": "FLOOR-AREA", "unit": "m²", "unit_price": 5800, "category_work": "防水工", "part_filter": ["balcony"] },
+    { "item_code": "WTR-02", "name_ja": "浴室 防水改修 + 仕上げ (在来UB)", "basis": "FLOOR-AREA", "unit": "m²", "unit_price": 9500, "category_work": "防水工", "part_filter": ["bathroom", "wet"] },
+    { "item_code": "PIP-01", "name_ja": "給排水管 更新 (露出配管・1式あたり)", "basis": "ROOM-COUNT", "unit": "式", "unit_price": 38000, "category_work": "設備工" },
+    { "item_code": "PIP-02", "name_ja": "PS内 縦配管 更新工事 (1本あたり)", "basis": "ROOM-COUNT", "unit": "式", "unit_price": 65000, "category_work": "設備工", "part_filter": ["shaft"] },
+    { "item_code": "DOR-01", "name_ja": "室内ドア 取替 (枠込み)", "basis": "DOOR-COUNT", "unit": "式", "unit_price": 45000, "category_work": "建具工" },
+    { "item_code": "WIN-01", "name_ja": "窓 サッシ取替 (複層ガラス)", "basis": "WINDOW-COUNT", "unit": "式", "unit_price": 85000, "category_work": "建具工" },
+    { "item_code": "CLN-01", "name_ja": "養生・清掃・産業廃棄物処理 (共通)", "basis": "ROOM-COUNT", "unit": "式", "unit_price": 12000, "category_work": "共通仮設" }
+  ]
+}

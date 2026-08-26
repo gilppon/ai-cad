@@ -12,6 +12,10 @@ from parser.line_refine import Line, refine_lines, merge_collinear_segments, sna
 from parser.room_detect import detect_rooms_from_walls
 from parser.room_export import rooms_to_json_dict
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def extract_vector_geometry(pdf_path: str, page_index: int = 0) -> Dict[str, Any]:
     """
     Extracts vector-based wall geometry from a PDF page and refines it.
@@ -131,4 +135,4 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
         res = extract_vector_geometry(sys.argv[1])
-        print(f"Extracted {res['walls_count']} walls from vector PDF.")
+        logger.info(f"Extracted {res['walls_count']} walls from vector PDF.")
