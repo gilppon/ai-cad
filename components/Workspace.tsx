@@ -8,64 +8,23 @@ import {
   AlertCircle,
   Check,
   History,
+  Loader2,
+  Zap,
 } from "lucide-react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas } from "@react-three/fiber";
 import {
   OrbitControls,
   Environment,
   ContactShadows,
-  Edges,
 } from "@react-three/drei";
-import * as THREE from "three";
 import LanguageSelector from "./LanguageSelector";
 import { useLanguage } from "@/lib/i18n";
 import dynamic from "next/dynamic";
 import type { SketchPadRef } from "./SketchPad";
 import DynamicModel, { ModelPart } from "./DynamicModel";
-import { Loader2, Zap } from "lucide-react";
 
 const SketchPad = dynamic(() => import("./SketchPad"), { ssr: false });
 
-function AnimatedBase({
-  dimension,
-  highlightEdge,
-}: {
-  dimension: number;
-  highlightEdge: boolean;
-}) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const targetScaleX = dimension / 50;
-  const targetX = 2 * targetScaleX - 2;
-
-  useFrame((state, delta) => {
-    if (meshRef.current) {
-      // Lerp scale
-      meshRef.current.scale.x = THREE.MathUtils.lerp(
-        meshRef.current.scale.x,
-        targetScaleX,
-        0.1,
-      );
-      // Lerp position
-      meshRef.current.position.x = THREE.MathUtils.lerp(
-        meshRef.current.position.x,
-        targetX,
-        0.1,
-      );
-    }
-  });
-
-  return (
-    <mesh ref={meshRef} castShadow receiveShadow position={[0, 0.5, 0]}>
-      <boxGeometry args={[4, 1, 2]} />
-      <meshStandardMaterial color="#4f46e5" roughness={0.2} metalness={0.8} />
-      <Edges
-        scale={1.001}
-        threshold={15}
-        color={highlightEdge ? "#60a5fa" : "#312e81"}
-      />
-    </mesh>
-  );
-}
 
 export default function Workspace({ onBack }: { onBack: () => void }) {
   const [dimension, setDimension] = useState(50);

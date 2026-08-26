@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Stage, Layer, Line, Circle, Arc, Image as KonvaImage } from 'react-konva';
-import { MouseEvent as ReactMouseEvent } from 'react';
-import { Pencil, Circle as CircleIcon, MousePointer2, Move, Upload, Trash2 } from 'lucide-react';
+import type Konva from 'konva';
+import { Pencil, Circle as CircleIcon, MousePointer2, Upload, Trash2 } from 'lucide-react';
 
 type Tool = 'select' | 'line' | 'circle' | 'arc';
 
@@ -29,12 +29,23 @@ const SketchPad = forwardRef<SketchPadRef, { hasError?: boolean }>(({ hasError }
   ]);
   const [currentShape, setCurrentShape] = useState<ShapeData | null>(null);
   const isDrawing = useRef(false);
-  const stageRef = useRef<any>(null);
+  const stageRef = useRef<Konva.Stage | null>(null);
   const [dimensions, setDimensions] = useState({ width: 400, height: 300 });
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
   const [bgImageProps, setBgImageProps] = useState({ x: 0, y: 0, width: 0, height: 0 });
+
+  useImperativeHandle(ref, () => ({
+    getBase64Image: () => {
+      if (!stageRef.current) return undefined;
+      return stageRef.current.toDataURL();
+    },
+    clear: () => {
+      setShapes([]);
+      setBgImage(null);
+    },
+  }));
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -79,10 +90,11 @@ const SketchPad = forwardRef<SketchPadRef, { hasError?: boolean }>(({ hasError }
     if (e.target) e.target.value = '';
   };
 
-  const handleMouseDown = (e: any) => {
+  const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (tool === 'select') return;
     
-    const pos = e.target.getStage().getPointerPosition();
+    const stage = e.target.getStage();
+    const pos = stage?.getPointerPosition();
     if (!pos) return;
 
     isDrawing.current = true;
@@ -97,11 +109,11 @@ const SketchPad = forwardRef<SketchPadRef, { hasError?: boolean }>(({ hasError }
     }
   };
 
-  const handleMouseMove = (e: any) => {
+  const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (!isDrawing.current || !currentShape) return;
 
     const stage = e.target.getStage();
-    const point = stage.getPointerPosition();
+    const point = stage?.getPointerPosition();
     if (!point) return;
 
     if (tool === 'line') {

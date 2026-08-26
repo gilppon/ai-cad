@@ -1,6 +1,5 @@
 import { motion } from "motion/react";
-import { Box, ArrowRight, Sparkles, Globe, ChevronRight } from "lucide-react";
-import Image from "next/image";
+import { Box, Sparkles, Globe, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import LanguageSelector from "./LanguageSelector";
 import { useLanguage } from "@/lib/i18n";
