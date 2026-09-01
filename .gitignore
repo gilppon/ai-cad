@@ -10,6 +10,7 @@ node_modules/
 coverage/
 .DS_Store
 *.log
+*.tsbuildinfo
 .env*
 !.env.example
 
@@ -25,7 +26,19 @@ artifacts/
 venv/
 .idea/
 .vscode/
+.workbuddy-ai/
 
 # Runtime artifacts (SP1-SP5)
 out/
-uploads/
+
+# 고객 도면·업로드물 — 절대 커밋 금지 (APPI)
+# 실제 발주처 도면이 이 경로에 저장된다. 이미 추적된 파일은 무시 규칙이 적용되지
+# 않으므로, 신규 추가 시 반드시 `git status`로 추적 여부를 확인할 것.
+uploads/*
+!uploads/.gitkeep
+
+# AI Studio 잔재 세션 산출물
+sessions/
+
+# 벡터 인덱스 빌드 산출물 (data/laws XML로부터 재생성 가능)
+vector_store/

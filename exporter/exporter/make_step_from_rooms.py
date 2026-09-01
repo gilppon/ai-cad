@@ -1,5 +1,6 @@
 # exporter/freecad_rooms_to_step.py
 import json
+from core.units import RASTER_PIXEL_TO_MM
 import os
 
 import FreeCAD as App
@@ -115,7 +116,8 @@ def load_payload(path: str):
     with open(path, "r", encoding="utf-8") as f:
         payload = json.load(f)
     scale = payload.get("scale", {})
-    pixel_to_mm = float(scale.get("pixel_to_mm", 1.0))  # 없으면 임시 1.0
+    # SP6/C8: 과거 1.0 을 사용해 타 경로(5.0)와 5배 어긋났다. SSOT 로 통일.
+    pixel_to_mm = float(scale.get("pixel_to_mm", RASTER_PIXEL_TO_MM))
     return payload, pixel_to_mm
 
 def poly_to_pts(poly, px_to_mm: float):

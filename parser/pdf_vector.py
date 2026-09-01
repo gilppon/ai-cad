@@ -8,7 +8,15 @@ import fitz
 from typing import List, Dict, Any
 from domain.models import Point, Wall
 from pipeline.contracts import validate_geometry_payload, build_geometry_payload, build_processing_metadata
-from parser.line_refine import Line, refine_lines, merge_collinear_segments, snap_endpoints, merge_parallel_pairs, filter_structural_walls
+from parser.line_refine import (
+    Line,
+    refine_lines,
+    merge_collinear_segments,
+    snap_endpoints,
+    merge_parallel_pairs,
+    subdivide_at_intersections,
+    filter_structural_walls,
+)
 from parser.room_detect import detect_rooms_from_walls
 from parser.room_export import rooms_to_json_dict
 
@@ -73,7 +81,13 @@ def extract_vector_geometry(pdf_path: str, page_index: int = 0) -> Dict[str, Any
     # 4. Merge parallel pairs (cleanup overlaps)
     refined = merge_parallel_pairs(refined, dist_tol=4.0)
 
-    # 5. Filter structural walls (eliminate isolated decorative lines/grid segments)
+    # 5. Planar subdivision (C10 fix)
+    #    교차점에서 세그먼트를 분할해 내부 정점을 생성한다.
+    #    이 단계가 없으면 아래 6번(차수 기반 필터)과 PSLG 면 추출이
+    #    내부 벽을 전부 삭제한다 — 실측: 8x8 격자 64실 -> 1실.
+    refined = subdivide_at_intersections(refined, min_piece=1.0)
+
+    # 6. Filter structural walls (eliminate isolated decorative lines/grid segments)
     refined = filter_structural_walls(refined, min_len_ratio=0.01, min_degree=1, join_tol=15)
 
 

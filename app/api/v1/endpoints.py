@@ -20,7 +20,7 @@ from app.schemas.incident import (
 from app.worker.tasks import process_pdf_task
 from celery.result import AsyncResult
 from fastapi import Depends
-from app.api.deps import get_current_user_and_db, get_supabase_client
+from app.api.deps import get_current_user_and_db, get_supabase_client, require_project
 
 # Stripe 결제 및 다국어(i18n) 통합 모듈 임포트
 from app.services.payment import StripePaymentService, CircuitBreakerOpenException
@@ -95,52 +95,56 @@ async def convert_pdf(
     db = auth_data["db"]
     
     # [하네스 프로토콜 - 결제 가드 및 회로 차단기]
+    # 주의: 여기서는 **차감하지 않고 자격만 확인**한다. 차감은 프로젝트 등록과
+    # 파일 저장이 모두 성공한 뒤에 수행한다 (아래 deduct 참조).
+    # 과거: 자격 확인 즉시 차감 → 이후 단계가 실패해도 크레딧이 소멸되었다.
     if not StripePaymentService.check_user_access_gate(user_id, db, amount=3):
         raise HTTPException(
-            status_code=402, 
+            status_code=402,
             detail="Payment required. Please purchase a plan or single ticket at /payments/checkout-session to access 3D conversion. (3 credits required)"
         )
-        
-    # 크레딧 3건 차감 시도
-    StripePaymentService.deduct_credit(user_id, db, amount=3)
-    
+
     file_extension = os.path.splitext(file.filename)[1]
-    
-    # Insert record into Supabase projects table (하네스 무장애 서킷 브레이커 도입 - 로컬 테이블 누락 시에도 안전 폴백)
+
     import logging
     logger = logging.getLogger(__name__)
-    
+
+    # SP6/P0-1: 과거에는 insert 실패 시 DB에 등록되지 않은 임의 ID로 처리를 강행했다.
+    # 그 결과 파일은 저장·처리되지만 사용자가 조회할 수 없는 유령 프로젝트가 되었다.
     try:
         response = db.table("projects").insert({
             "user_id": user_id,
             "original_filename": file.filename,
             "status": "pending"
         }).execute()
-        
-        if response.data:
-            project_id = response.data[0]["id"]
-        else:
-            import uuid
-            project_id = f"proj_{uuid.uuid4().hex[:12]}"
+
+        if not response.data:
+            raise RuntimeError("Insert returned no rows (possibly blocked by RLS)")
+        project_id = response.data[0]["id"]
     except Exception as e:
-        import uuid
-        project_id = f"proj_{uuid.uuid4().hex[:12]}"
-        logger.warning(f"[Harness Fallback] Supabase 'projects' table not found or insert failed, using fallback ID '{project_id}': {str(e)}")
-        
+        logger.error(f"[Convert] Failed to register project for user={user_id}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="프로젝트를 등록할 수 없습니다. 크레딧은 차감되지 않았습니다. 잠시 후 다시 시도해 주십시오."
+        )
+
     saved_file_name = f"{project_id}{file_extension}"
     file_path = os.path.join(UPLOAD_DIR, saved_file_name)
-    
-    # 1. 파일 저장
+
+    # 1. 파일 저장 (실패 시 크레딧 미차감 상태로 종료되므로 손실 없음)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
-    # Update DB status to processing
+
+    # 2. 모든 준비가 끝난 뒤 크레딧 3건 차감
+    StripePaymentService.deduct_credit(user_id, db, amount=3)
+
+    # Update DB status to processing (소유자 기준으로 한정 — C1)
     try:
-        db.table("projects").update({"status": "processing"}).eq("id", project_id).execute()
+        db.table("projects").update({"status": "processing"}).eq("id", project_id).eq("user_id", user_id).execute()
     except Exception as e:
         logger.warning(f"[Harness Fallback] Failed to update project status in Supabase: {str(e)}")
-    
-    # 2. Celery Task 호출
+
+    # 3. Celery Task 호출
     task = process_pdf_task.delay(file_path, project_id)
     
     return TaskResponse(
@@ -174,6 +178,36 @@ async def get_task_status(task_id: str):
         error=error
     )
 
+@router.get("/projects")
+async def list_projects(auth_data: dict = Depends(get_current_user_and_db)):
+    """
+    로그인한 사용자의 프로젝트 목록 조회 (SP6/P0-2 신설).
+
+    이 엔드포인트가 없어 프론트엔드(reports/dashboard)가 프로젝트를 열거할 수 없었고,
+    그 결과 하드코딩된 가짜 프로젝트 2건을 표시하고 있었다 (C2).
+
+    소유권은 .eq("user_id", ...) 와 RLS 양쪽으로 강제된다.
+    """
+    db = auth_data["db"]
+    user_id = auth_data["user_id"]
+
+    try:
+        res = (
+            db.table("projects")
+            .select("id, original_filename, status, ifc_url, error_message, created_at, updated_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+    except Exception as e:
+        logger.error(f"[Projects] Failed to list projects for user={user_id}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="프로젝트 목록을 불러올 수 없습니다. 잠시 후 다시 시도해 주십시오.",
+        )
+
+    return {"projects": res.data or []}
+
 from pipeline.paths import OUTPUT_ROOT
 import json
 
@@ -181,18 +215,13 @@ import json
 async def get_project_geometry(project_id: str, auth_data: dict = Depends(get_current_user_and_db)):
     db = auth_data["db"]
     
-    # [하네스 서킷 브레이커 - DB 통신 장애 극복용 차단막]
-    import logging
-    logger = logging.getLogger(__name__)
-    try:
-        res = db.table("projects").select("id").eq("id", project_id).execute()
-        if not res.data:
-            # 로컬 파일이 실제로 존재하는지 2차 체크하여 무장애 보장
-            geom_path = OUTPUT_ROOT / "projects" / project_id / "page0_rooms.json"
-            if not geom_path.exists():
-                raise HTTPException(status_code=404, detail="Project not found")
-    except Exception as e:
-        logger.warning(f"[Harness Fallback] Supabase query failed in get_project_geometry, bypassing check: {str(e)}")
+    # SP6/P0-1: 소유권 검증 (C1).
+    # 과거: 이 블록은 try/except 로 감싸져 있었고, 예외 발생 시
+    #       "bypassing check" 로그를 남기며 **인증 검사를 건너뛰고** 진행했다.
+    #       즉 Supabase 가 잠시 불안정하면 누구나 타인의 도면을 열람할 수 있었다.
+    #       또한 DB에 없어도 로컬 파일만 있으면 통과시켰다 (소유권 미검증).
+    # 현재: require_project 는 DB 오류를 503 으로 처리한다 (fail-closed).
+    require_project(db, project_id, auth_data["user_id"])
 
     geom_path = OUTPUT_ROOT / "projects" / project_id / "page0_rooms.json"
     if not geom_path.exists():
@@ -216,9 +245,8 @@ async def apply_corrections(
     from app.schemas.correction import CorrectionBatchRequest, CorrectionSessionResponse, CorrectionPatchResponse
 
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    user_id = auth_data["user_id"]
+    require_project(db, project_id, user_id)
 
     geom_path = str(OUTPUT_ROOT / "projects" / project_id / "page0_rooms.json")
     if not os.path.exists(geom_path):
@@ -333,8 +361,9 @@ async def apply_corrections(
     }
     if ifc_path:
         db_update["ifc_url"] = ifc_path
-        
-    db.table("projects").update(db_update).eq("id", project_id).execute()
+
+    # 소유자 기준으로 한정 (C1) — 타인 프로젝트 갱신 차단
+    db.table("projects").update(db_update).eq("id", project_id).eq("user_id", user_id).execute()
 
     return {
         "status": "success",
@@ -353,9 +382,7 @@ async def get_correction_history(
 ):
     """프로젝트의 보정 이력 조회"""
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     from correction.history import list_sessions, get_correction_stats
 
@@ -371,9 +398,7 @@ async def get_correction_history(
 @router.get("/projects/{project_id}/compliance-report")
 async def get_compliance_report(project_id: str, auth_data: dict = Depends(get_current_user_and_db)):
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     comp_path = OUTPUT_ROOT / "projects" / project_id / "page0_compliance.json"
     if not comp_path.exists():
@@ -401,11 +426,8 @@ async def get_compliance_report(project_id: str, auth_data: dict = Depends(get_c
 @router.get("/projects/{project_id}/download-ifc")
 async def download_ifc(project_id: str, auth_data: dict = Depends(get_current_user_and_db)):
     db = auth_data["db"]
-    res = db.table("projects").select("id, ifc_url").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project = res.data[0]
+    # require_project 는 소유권이 확인된 행을 반환한다 (없으면 404).
+    project = require_project(db, project_id, auth_data["user_id"], select="id, ifc_url")
     ifc_path = project.get("ifc_url")
 
     if not ifc_path or not os.path.exists(ifc_path):
@@ -445,9 +467,7 @@ async def create_incident(
 ):
     """프로젝트에 인시던트 데이터를 생성/저장"""
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     from domain.models import (
         LeakCase, LeakSource, DamageZone, SuspectedPath,
@@ -530,9 +550,7 @@ async def get_incident(
 ):
     """프로젝트의 인시던트 데이터 조회"""
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     path = _incident_json_path(project_id)
     if not os.path.exists(path):
@@ -564,9 +582,7 @@ async def update_incident(
 ):
     """프로젝트의 인시던트 데이터 갱신 (버전 자동 증가)"""
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     path = _incident_json_path(project_id)
 
@@ -661,9 +677,7 @@ async def add_annotation(
 ):
     """인시던트에 어노테이션(사진/메모) 추가"""
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     path = _incident_json_path(project_id)
     if not os.path.exists(path):
@@ -708,9 +722,7 @@ async def delete_annotation(
 ):
     """인시던트에서 어노테이션 삭제"""
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     path = _incident_json_path(project_id)
     if not os.path.exists(path):
@@ -747,11 +759,7 @@ async def get_pdf_report(
             detail="Payment required. Please purchase a plan or single ticket at /payments/checkout-session to download PDF reports."
         )
 
-    res = db.table("projects").select("*").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project = res.data[0]
+    project = require_project(db, project_id, auth_data["user_id"], select="*")
     metadata = project.get("metadata", {}) or {}
     raw_opinions = metadata.get("compliance_opinions", [])
     
@@ -854,7 +862,12 @@ async def create_checkout_session(
             detail="Payment gateway temporarily unavailable. Please retry in a minute."
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Checkout creation failed: {str(e)}")
+        # 내부 예외 메시지를 클라이언트에 노출하지 않는다 (정보 유출 방지).
+        logger.error(f"[Payments] Checkout creation failed for user={user_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="決済セッションの作成に失敗しました。しばらくしてから再度お試しください。",
+        )
 
 
 @router.post("/payments/webhook")
@@ -863,20 +876,26 @@ async def payment_webhook(
     db = Depends(get_supabase_client)
 ):
     """
-    Stripe 결제 성공 콜백/웹훅 및 Mock 수신 처리 API
+    Stripe 결제 성공 콜백/웹훅 처리 API.
+
+    SP6/P0-8: 재시도 가능 오류(DB 반영 실패)는 5xx 로 반환해 Stripe 재전달을
+    유도하고, 서명 불일치처럼 재시도로 해결되지 않는 오류는 4xx 로 반환한다.
+    중복 이벤트는 200 으로 흡수해 Stripe 의 무한 재시도를 막는다.
     """
     raw_body = await request.body()
     sig_header = request.headers.get("stripe-signature")
-    
+
     result = StripePaymentService.verify_and_apply_webhook(
         raw_body=raw_body,
         sig_header=sig_header,
         db=db
     )
-    
+
     if result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=result.get("message"))
-        
+        # 재시도 가능 여부에 따라 상태 코드를 분리한다.
+        status_code = 503 if result.get("retryable") else 400
+        raise HTTPException(status_code=status_code, detail=result.get("message"))
+
     return result
 
 
@@ -899,9 +918,12 @@ async def get_payment_status(
             plan_type = res.data[0].get("plan_type", "free") or "free"
             credits = res.data[0].get("credits", 0) or 0
     except Exception as e:
-        # DB 테이블 부재 시 Fallback
-        logger.warning(f"Project media list fallback for {project_id}: {e}")
-        
+        # SP6/P0-8: 과거 이 블록은 정의되지 않은 `project_id` 를 참조해
+        #   DB 오류 시 NameError 를 유발하고 500 으로 번지던 복사-붙여넣기 결함이었다.
+        #   또한 "Fallback" 이라는 주석과 달리 실제 폴백 로직은 존재하지 않았다.
+        #   현재: 오류를 기록하고 보수적 기본값(free / 크레딧 0)을 유지한다.
+        logger.error(f"[Payments] Failed to read profile for user={user_id}: {e}")
+
     active = StripePaymentService.check_user_access_gate(user_id, db)
     circuit = StripePaymentService._circuit_state
     
@@ -924,14 +946,11 @@ async def upload_project_media(
     """
     db = auth_data["db"]
     
-    # 프로젝트 유효성 검증
-    try:
-        res = db.table("projects").select("id").eq("id", project_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-    except Exception as e:
-        # Mock DB 지원용
-        logger.warning(f"Media metadata fallback for {project_id}: {e}")
+    # SP6/P0-1: 소유권 검증 (C1).
+    # 과거: try/except 가 HTTPException(404) 까지 삼켜 "fallback" 로그만 남기고
+    #       진행했다. 결과적으로 존재하지 않는/권한 없는 프로젝트에도
+    #       사진 업로드가 가능했다. 검증 자체가 무효화되어 있던 상태다.
+    require_project(db, project_id, auth_data["user_id"])
 
     # 파일 확장자 검사
     ext = os.path.splitext(file.filename)[1].lower()
@@ -1022,13 +1041,10 @@ async def patch_incident_pins(
     """
     db = auth_data["db"]
     
-    # 1. 프로젝트 유효성 확인
-    try:
-        res = db.table("projects").select("id").eq("id", project_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-    except Exception as e:
-        logger.warning(f"Project validation skipped for {project_id} (mock/fallback): {e}")
+    # 1. 프로젝트 소유권 확인 (C1)
+    # 과거: try/except 가 HTTPException(404) 까지 삼켜 검증이 무효화되어 있었다.
+    #       타인 프로젝트의 3D 핀 좌표를 수정할 수 있는 상태였다.
+    require_project(db, project_id, auth_data["user_id"])
 
     # 2. incident.json 로드
     path = _incident_json_path(project_id)
@@ -1142,7 +1158,8 @@ async def patch_incident_pins(
     }
     
     try:
-        db.table("projects").update(db_update).eq("id", project_id).execute()
+        # 소유자 기준으로 한정 (C1) — require_project 로 이미 검증했으나 2중 방어
+        db.table("projects").update(db_update).eq("id", project_id).eq("user_id", auth_data["user_id"]).execute()
     except Exception as e:
         logger.warning(f"Pin update DB persist failed for {project_id}/{case_id}: {e}")
 
@@ -1185,13 +1202,13 @@ async def get_compliance_checksheet(
         StripePaymentService.deduct_credit(user_id, db, amount=10)
 
     # 프로젝트 정보 획득
-    try:
-        res = db.table("projects").select("*").eq("id", project_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-        project = res.data[0]
-    except Exception:
-        project = {"id": project_id, "original_filename": f"Project_{project_id}"}
+    #
+    # SP6/P0-1: 과거 이 호출은 try/except 로 감싸져 있었고, 소유권 검증 실패(404)나
+    # DB 장애(503)를 삼킨 뒤 `{"id": project_id, "original_filename": ...}` 를
+    # 조립해 계속 진행했다. 즉 **자신이 소유하지 않은 project_id 로도** 로컬 파일을
+    # 읽어 체크시트를 발급할 수 있는 IDOR 우회 경로였다.
+    # 현재: 실패는 그대로 전파해 404/503 으로 응답한다 (fail-closed).
+    project = require_project(db, project_id, auth_data["user_id"], select="*")
 
     building_name = project.get("original_filename", f"Project_{project_id}")
     if building_name.endswith('.pdf') or building_name.endswith('.PDF'):
@@ -1505,9 +1522,7 @@ async def sync_offline_changes(
     import uuid
 
     db = auth_data["db"]
-    res = db.table("projects").select("id").eq("id", project_id).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project(db, project_id, auth_data["user_id"])
 
     # 1. incident.json 로드 및 낙관적 락 검증
     incident_path = _incident_json_path(project_id)
@@ -1667,7 +1682,8 @@ async def sync_offline_changes(
         db_update["ifc_url"] = ifc_path
         
     try:
-        db.table("projects").update(db_update).eq("id", project_id).execute()
+        # 소유자 기준으로 한정 (C1) — require_project 로 이미 검증했으나 2중 방어
+        db.table("projects").update(db_update).eq("id", project_id).eq("user_id", auth_data["user_id"]).execute()
     except Exception as e:
         logger.warning(f"Offline-sync DB persist failed for {project_id}: {e}")
 

@@ -187,7 +187,10 @@ def test_checksheet_energy_section_e2e(monkeypatch):
         if name == "profiles":
             return FakeTable([{"id": "user_sp5", "plan_type": "free", "credits": 10}])
         if name == "projects":
-            return FakeTable([{"id": project_id, "original_filename": "sp5.pdf"}])
+            # SP6/P0-1: 소유권 필터 .eq("user_id", ...) 가 강제되므로 user_id 필수
+            return FakeTable([
+                {"id": project_id, "user_id": "user_sp5", "original_filename": "sp5.pdf"}
+            ])
         return FakeTable([])
 
     fake_db.table.side_effect = table

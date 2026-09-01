@@ -7,6 +7,7 @@ from datetime import datetime
 
 from domain.models import LeakCase
 from pipeline.contracts import validate_geometry_payload, validate_export_metadata
+from core.units import RASTER_PIXEL_TO_MM
 from pipeline.paths import resolve_output_path, resolve_project_path
 from harness.circuit_breaker import circuit_breaker
 import fitz
@@ -93,7 +94,7 @@ class PipelineEngine:
                 from parser.room_detect import detect_rooms
                 room_result = detect_rooms(pdf_path, page=page_index)
                 from parser.room_export import save_rooms_json
-                save_rooms_json(room_result, rooms_json_path, page=page_index, pixel_to_mm=5.0)
+                save_rooms_json(room_result, rooms_json_path, page=page_index, pixel_to_mm=RASTER_PIXEL_TO_MM)
                 with open(rooms_json_path, "r", encoding="utf-8") as f:
                     payload = json.load(f)
             except Exception as e:

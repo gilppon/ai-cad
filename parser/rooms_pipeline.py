@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional
 import math
+from core.units import RASTER_PIXEL_TO_MM
 import os
 import json
 import cv2
@@ -849,7 +850,7 @@ def export_step_from_rooms(
     *,
     out_step: str = "out/result.step",
     out_meta: str = "out/result.meta.json",
-    px_to_mm: float = 5.0,      # ★ 픽셀 → mm 스케일 (도면마다 고정)
+    px_to_mm: float = RASTER_PIXEL_TO_MM,  # ★ 픽셀 → mm 스케일 (SSOT)
     wall_height_mm: float = 2400.0,
 ):
     """

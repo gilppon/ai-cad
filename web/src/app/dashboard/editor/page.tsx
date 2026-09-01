@@ -49,7 +49,10 @@ interface DamageZone {
 function EditorContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const projectId = searchParams.get("project_id") || "mock_project_123";
+
+  // SP6/P0-4: project_id는 필수. 없으면 Mock으로 대체하지 않고 즉시 오류를 노출한다.
+  // (과거: 하드코딩된 가짜 프로젝트 ID 로 폴백 — 결제 고객에게 실존하지 않는 데모 도면이 표시되던 결함)
+  const projectId = searchParams.get("project_id");
 
   // 상태 관리 (2D 도면 데이터 및 기하 상태)
   const [walls, setWalls] = useState<Wall[]>([]);
@@ -69,58 +72,60 @@ function EditorContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [complianceOpinions, setComplianceOpinions] = useState<any[]>([]);
 
-  // 1. 초기 프로젝트 데이터 로드 (모의/실데이터 유연한 대응)
+  // SP6/P0-5: 로드·저장 실패는 반드시 사용자에게 노출한다. 조용한 Mock 폴백은 금지.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+
+  // 1. 초기 프로젝트 데이터 로드 (실데이터 전용 — 폴백 없음)
   useEffect(() => {
+    if (!projectId) {
+      setIsLoading(false);
+      setLoadError("project_id가 지정되지 않았습니다. 대시보드에서 프로젝트를 선택해 주십시오.");
+      return;
+    }
+
+    let cancelled = false;
+
     async function loadProjectData() {
       setIsLoading(true);
+      setLoadError(null);
       try {
-        // 실제 API 연동 시도 (실패 시 mock 데이터로 우아하게 대응하는 서킷 브레이커)
         const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/geometry`, {
           headers: await getAuthHeaders()
         });
-        if (res.ok) {
-          const data = await res.json();
-          // API 데이터 바인딩
-          setWalls(data.walls || []);
-          setRooms(data.rooms || []);
-          setLeakSources(data.incident?.leak_sources || []);
-          setDamageZones(data.incident?.damage_zones || []);
-          setComplianceOpinions(data.incident?.compliance_opinions || []);
-          if (data.canvas) {
-            setCanvas(data.canvas);
-          }
-        } else {
-          // Fallback Mock Data (개발용 시각적 완성도 보장)
-          setWalls([
-            { id: 1, p1: { x: 50, y: 50 }, p2: { x: 350, y: 50 }, thickness_px: 10 },
-            { id: 2, p1: { x: 350, y: 50 }, p2: { x: 350, y: 250 }, thickness_px: 10 },
-            { id: 3, p1: { x: 350, y: 250 }, p2: { x: 50, y: 250 }, thickness_px: 10 },
-            { id: 4, p1: { x: 50, y: 250 }, p2: { x: 50, y: 50 }, thickness_px: 10 },
-            { id: 5, p1: { x: 220, y: 50 }, p2: { x: 220, y: 250 }, thickness_px: 8 } // 세대내 칸막이벽
-          ]);
-          setRooms([
-            {
-              id: 1,
-              polygon: [{ x: 50, y: 50 }, { x: 220, y: 50 }, { x: 220, y: 250 }, { x: 50, y: 250 }],
-              kind: "ldk",
-              area_m2: 24.5
-            },
-            {
-              id: 2,
-              polygon: [{ x: 220, y: 50 }, { x: 350, y: 50 }, { x: 350, y: 250 }, { x: 220, y: 250 }],
-              kind: "toilet",
-              area_m2: 12.2
-            }
-          ]);
+
+        if (!res.ok) {
+          const detail = res.status === 404
+            ? "프로젝트를 찾을 수 없거나 접근 권한이 없습니다."
+            : `서버가 도면 데이터를 반환하지 않았습니다 (HTTP ${res.status}).`;
+          if (!cancelled) setLoadError(detail);
+          return;
+        }
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        // API 데이터 바인딩 — 빈 배열은 빈 도면으로 정직하게 렌더링한다.
+        setWalls(data.walls || []);
+        setRooms(data.rooms || []);
+        setLeakSources(data.incident?.leak_sources || []);
+        setDamageZones(data.incident?.damage_zones || []);
+        setComplianceOpinions(data.incident?.compliance_opinions || []);
+        if (data.canvas) {
+          setCanvas(data.canvas);
         }
       } catch (err) {
-        console.error("데이터 로드 실패, 서킷 브레이커 가동:", err);
+        console.error("도면 데이터 로드 실패:", err);
+        if (!cancelled) setLoadError("네트워크 오류로 도면 데이터를 불러오지 못했습니다.");
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     }
     loadProjectData();
-  }, [projectId]);
+
+    return () => { cancelled = true; };
+  }, [projectId, reloadNonce]);
 
   // 2. 2D 도면 드래깅 및 상호작용 관련 마우스 핸들러
   const handleSvgMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -151,29 +156,12 @@ function EditorContent() {
 
       setLeakSources([newLeak]); // 핀은 하나만 배치 가능하도록 덮어쓰기
       setActiveTool("select"); // 완료 후 선택 모드로 자동 전환
-      
-      // 임시 책임소재 코멘트 갱신 (로컬 모의 반응)
-      const targetRoom = rooms.find(r => r.id === hitRoomId);
-      if (targetRoom) {
-        let decision = "PROPRIETARY";
-        let label = "専有部分 (住戸内)";
-        let basis = "マンション標準管理規約第7条";
-        let desc = "해당 세대 내 욕실/화장실 등 전유 배관 지관 누수로 판정됩니다.";
-        
-        if (targetRoom.kind === "toilet") {
-          decision = "PROPRIETARY";
-          label = "専有部分 (浴室・トイレ枝管)";
-          desc = "욕실 또는 배수관 불량에 따른 지관 하자 책임이 유력합니다.";
-        }
-        
-        setComplianceOpinions([{
-          room_id: hitRoomId,
-          ownership_decision: decision,
-          decision_label: label,
-          legal_basis: basis,
-          japanese_opinion: desc
-        }]);
-      }
+
+      // SP6/P0-4: 법적 소견은 백엔드(compliance 엔진)만 생성할 수 있다.
+      // (과거: 클라이언트가 「マンション標準管理規約第7条」등을 하드코딩해 소견을 조작 —
+      //  근거 없는 법적 판정을 고객에게 표시하던 중대 결함)
+      // 핀 배치 시점에는 기존 소견을 무효화하고, 저장 후 백엔드 응답으로만 갱신한다.
+      setComplianceOpinions([]);
     }
   };
 
@@ -206,7 +194,9 @@ function EditorContent() {
 
   // 3. 델타 패치 백엔드 동기화 및 3D 실시간 재빌드 전송
   const handleSaveCorrections = async () => {
+    if (!projectId) return;
     setIsSaving(true);
+    setSaveError(null);
     try {
       const operations = [];
       
@@ -233,7 +223,8 @@ function EditorContent() {
       }
 
       const payload = {
-        case_id: "LEAK-EDIT-2026",
+        // SP6/P0-4: 과거 "LEAK-EDIT-2026" 상수 하드코딩 — 모든 교정이 동일 케이스로 기록되던 결함.
+        case_id: `LEAK-${projectId}`,
         operations: operations
       };
 
@@ -248,14 +239,18 @@ function EditorContent() {
 
       if (res.ok) {
         const result = await res.json();
+        // 법적 소견은 백엔드 응답으로만 표시한다. 응답에 없으면 "판정 불가"로 남긴다.
         setComplianceOpinions(result.compliance_opinions || []);
-        alert("수동 교정이 적용되었으며, 3D 모델이 3초 안에 성공적으로 재생성되었습니다!");
+        setSaveError(null);
       } else {
-        alert("일시적 서버 오류로 재빌드가 지연되고 있습니다. 서킷 브레이커 가동.");
+        const detail = res.status === 404
+          ? "프로젝트를 찾을 수 없거나 접근 권한이 없습니다."
+          : `교정 적용에 실패했습니다 (HTTP ${res.status}).`;
+        setSaveError(detail);
       }
     } catch (err) {
       console.error(err);
-      alert("보정 패치 저장 중 네트워크 오류 발생");
+      setSaveError("네트워크 오류로 교정 패치를 저장하지 못했습니다.");
     } finally {
       setIsSaving(false);
     }
@@ -294,6 +289,23 @@ function EditorContent() {
         </div>
       </header>
 
+      {/* SP6/P0-5: 저장 실패는 배너로 명시한다. (과거: alert() 토스트 + "서킷 브레이커 가동" 은폐 문구) */}
+      {saveError && (
+        <div className="mx-6 mt-4 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-red-300 text-sm font-semibold">교정 적용 실패</p>
+            <p className="text-red-400/80 text-xs mt-0.5">{saveError}</p>
+          </div>
+          <button
+            onClick={() => setSaveError(null)}
+            className="text-red-400/70 hover:text-red-300 text-xs cursor-pointer"
+          >
+            닫기
+          </button>
+        </div>
+      )}
+
       {/* 메인 2D-3D 분할 에디터 캔버스 */}
       <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-2 gap-6 overflow-hidden">
         
@@ -326,6 +338,20 @@ function EditorContent() {
               <div className="flex flex-col items-center">
                 <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
                 <p className="text-neutral-500 text-sm">2D 도면 분석 데이터 로드 중...</p>
+              </div>
+            ) : loadError ? (
+              /* SP6/P0-5: 실패를 숨기지 않는다. 가짜 도면보다 빈 화면이 안전하다. */
+              <div className="flex flex-col items-center text-center px-8 max-w-md">
+                <AlertTriangle className="w-10 h-10 text-amber-500 mb-3" />
+                <p className="text-amber-400 text-sm font-semibold mb-1">도면 데이터를 불러올 수 없습니다</p>
+                <p className="text-neutral-500 text-xs leading-relaxed mb-4">{loadError}</p>
+                <button
+                  onClick={() => setReloadNonce(n => n + 1)}
+                  className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>다시 시도</span>
+                </button>
               </div>
             ) : (
               <svg 
@@ -464,18 +490,26 @@ function EditorContent() {
           )}
         </div>
 
+        {/*
+          SP6/P0-4: 과거 이 영역에 「실시간 3D 재빌드 속도 평균 1.8초 (상수 유지)」,
+          「파싱 보정 성공률 100% (작업자 보정 보증)」, 「일본 소견 지침 완벽 충족」이
+          하드코딩되어 있었다. 측정 근거가 없는 성능·적합 주장이며, 일본 경품표시법상
+          우량오인(優良誤認) 소지가 있는 표시다. 실측값만 표시하도록 교체한다.
+        */}
         <div className="md:w-72 flex flex-col justify-center border-t md:border-t-0 md:border-l border-neutral-800 pt-4 md:pt-0 md:pl-6 gap-2">
           <div className="flex justify-between items-center text-xs text-neutral-400">
-            <span>실시간 3D 재빌드 속도</span>
-            <span className="font-semibold text-emerald-400">평균 1.8초 (상수 유지)</span>
+            <span>인식된 공간</span>
+            <span className="font-semibold text-neutral-200">{rooms.length}개</span>
           </div>
           <div className="flex justify-between items-center text-xs text-neutral-400">
-            <span>도면 파싱 보정 성공률</span>
-            <span className="font-semibold text-blue-400">100% (작업자 보정 보증)</span>
+            <span>인식된 벽체</span>
+            <span className="font-semibold text-neutral-200">{walls.length}개</span>
           </div>
           <div className="flex justify-between items-center text-xs text-neutral-400">
-            <span>보험 대기업 청구 서식 규격</span>
-            <span className="font-semibold text-purple-400">일본 소견 지침 완벽 충족</span>
+            <span>소견 산출 주체</span>
+            <span className="font-semibold text-neutral-200">
+              {complianceOpinions.length > 0 ? "서버 컴플라이언스 엔진" : "미산출"}
+            </span>
           </div>
         </div>
       </footer>

@@ -1,164 +1,324 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { FileText, Download, Building, ShieldCheck, Calendar, RefreshCw } from "lucide-react";
-import { getLocalSession, UserSession } from "@/utils/supabase";
+import { useState, useEffect, useCallback } from "react";
+import { FileText, Download, Calendar, RefreshCw, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { API_BASE_URL } from "@/utils/api";
+import { getAuthHeaders } from "@/utils/apiAuth";
 
-interface ReportItem {
+/**
+ * SP6/P0-4: 과거 이 페이지는 하드코딩된 가짜 프로젝트 2건
+ * 하드코딩된 가짜 프로젝트 2건(도쿄 아오야마, 오사카 우메다)을 표시했고,
+ * 각 항목에 조작된 적합 판정(適合 / 一部不適合)과 법적 소견을 붙여 두었다.
+ * 헤더 문구는 "보험사 청구 및 인허가 신청 첨부 서류로 즉시 활용 가능"이라고
+ * 단정하고 있었다 — 근거 없는 표시이며 고객 오판을 유발한다.
+ *
+ * 현재: 실제 백엔드 `GET /api/v1/projects` 목록만 표시한다.
+ *       판정은 백엔드 컴플라이언스 엔진 응답으로만 렌더링한다.
+ */
+
+interface Project {
   id: string;
-  projectName: string;
-  inspectDate: string;
-  complianceStatus: "PASS" | "WARNING" | "FAIL";
-  lightVerdict: string;
-  heightVerdict: string;
-  leakOpinion: string;
+  original_filename: string;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+  error_message?: string | null;
 }
 
+interface RuleEvaluation {
+  rule_id: string;
+  rule_name: string;
+  status: string;
+  reason?: string;
+}
+
+interface ComplianceReport {
+  status: string;
+  total_violations: number;
+  room_results: { room_id: string; room_kind: string; evaluations: RuleEvaluation[] }[];
+  slm_assessment?: { opinion_ja?: string } | string | null;
+}
+
+const STATUS_LABEL: Record<string, { text: string; className: string }> = {
+  pending: { text: "대기", className: "bg-neutral-700/20 text-neutral-300 border-neutral-600" },
+  processing: { text: "분석 중", className: "bg-blue-500/10 text-blue-400 border-blue-500/25" },
+  completed: { text: "완료", className: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25" },
+  error: { text: "실패", className: "bg-red-500/10 text-red-400 border-red-500/25" },
+};
+
 export default function ReportsPage() {
-  const [session, setSession] = useState<UserSession | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  
-  const [reports, setReports] = useState<ReportItem[]>([
-    {
-      id: "mock_project_123",
-      projectName: "도쿄 아오야마 맨션 201호 준공 도면 (Tokyo Aoyama Mansions)",
-      inspectDate: "2026-05-20",
-      complianceStatus: "PASS",
-      lightVerdict: "適合 (PASS)",
-      heightVerdict: "適合 (PASS)",
-      leakOpinion: "専有部分 (욕실/ toilet 배수 지관 하자 책임 유력)"
-    },
-    {
-      id: "mock_project_456",
-      projectName: "오사카 우메다 B블럭 상업시설 층고 보정 도면 (Osaka Umeda Commercial)",
-      inspectDate: "2026-05-18",
-      complianceStatus: "WARNING",
-      lightVerdict: "適合 (PASS)",
-      heightVerdict: "一部不適合 (WARNING - 국부 층고 부족)",
-      leakOpinion: "공용부분 (SHAFT 파이프 샤프트 내 누수)"
-    }
-  ]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [reports, setReports] = useState<Record<string, ComplianceReport>>({});
+  const [reportErrors, setReportErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    setSession(getLocalSession());
-  }, []);
-
-  const handleDownloadPDF = async (reportId: string) => {
-    setDownloadingId(reportId);
+  const loadProjects = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
     try {
-      // 1. 실제 백엔드의 ReportLab PDF 발행 엔드포인트 연동 시도 (/pdf-report GET 라우트 호출)
-      // (만약 백엔드가 비활성 상태이면 로컬 헬퍼 다운로드 링크로 대체하는 서킷 브레이커)
-      const res = await fetch(`/api/v1/projects/${reportId}/pdf-report`, {
-        method: "GET"
+      const res = await fetch(`${API_BASE_URL}/api/v1/projects`, {
+        headers: await getAuthHeaders(),
       });
 
-      if (res.ok) {
-        // 백엔드에서 반환된 PDF 바이너리 수령
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Japanbuild_BIM3D_Compliance_${reportId}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      } else {
-        // Fallback: 8000포트 백엔드로의 브라우저 다이렉트 트리거 제공
-        alert("🌐 [백엔드 다이렉트 브로커 가동]\n백엔드 API 서버를 통해 직접 법령 합격 증명서 PDF를 생성 및 출력합니다.");
-        window.open(`${API_BASE_URL}/api/v1/projects/${reportId}/pdf-report`, "_blank");
+      if (!res.ok) {
+        throw new Error(
+          res.status === 401
+            ? "로그인이 만료되었습니다. 다시 로그인해 주십시오."
+            : `프로젝트 목록을 불러오지 못했습니다 (HTTP ${res.status}).`
+        );
       }
+
+      const data = await res.json();
+      setProjects(data.projects || []);
     } catch (err) {
-      console.error(err);
-      // 최종 Fallback: 백엔드 URL로 직접 강제 오픈
-      window.open(`${API_BASE_URL}/api/v1/projects/${reportId}/pdf-report`, "_blank");
+      setLoadError(err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  /** 적합 판정 조회 — 백엔드 응답으로만 렌더링한다. 프론트에서 판정을 만들지 않는다. */
+  const loadCompliance = async (projectId: string) => {
+    if (reports[projectId]) {
+      setExpandedId(expandedId === projectId ? null : projectId);
+      return;
+    }
+
+    setReportErrors((prev) => ({ ...prev, [projectId]: "" }));
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/v1/projects/${projectId}/compliance-report`,
+        { headers: await getAuthHeaders() }
+      );
+
+      if (!res.ok) {
+        throw new Error(
+          res.status === 404
+            ? "아직 컴플라이언스 데이터가 생성되지 않았습니다."
+            : `판정을 불러오지 못했습니다 (HTTP ${res.status}).`
+        );
+      }
+
+      const data = await res.json();
+      setReports((prev) => ({ ...prev, [projectId]: data }));
+      setExpandedId(projectId);
+    } catch (err) {
+      setReportErrors((prev) => ({
+        ...prev,
+        [projectId]: err instanceof Error ? err.message : "판정을 불러오지 못했습니다.",
+      }));
+      setExpandedId(projectId);
+    }
+  };
+
+  /** PDF 다운로드 — 인증 헤더가 필요하므로 window.open() 이 아닌 blob fetch 를 사용한다. */
+  const handleDownloadPDF = async (projectId: string) => {
+    setDownloadingId(projectId);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/v1/projects/${projectId}/pdf-report`,
+        { headers: await getAuthHeaders() }
+      );
+
+      if (!res.ok) {
+        throw new Error(
+          res.status === 404
+            ? "아직 리포트가 생성되지 않았습니다."
+            : `리포트 생성에 실패했습니다 (HTTP ${res.status}).`
+        );
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Japanbuild_BIM3D_Compliance_${projectId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setReportErrors((prev) => ({
+        ...prev,
+        [projectId]: err instanceof Error ? err.message : "리포트를 내려받지 못했습니다.",
+      }));
     } finally {
       setDownloadingId(null);
     }
   };
 
-  if (!session) return <div className="text-neutral-400 text-sm">로딩 중...</div>;
-
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
-      
-      {/* 아카이브 헤더 설명 */}
       <div>
         <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
           <FileText className="w-5 h-5 text-blue-500" />
-          <span>일본 MLIT 자가 적합성 검격 PDF 아카이브</span>
+          <span>컴플라이언스 리포트</span>
         </h3>
         <p className="text-xs text-neutral-400 max-w-xl leading-normal">
-          본 문서고에 보관된 리포트는 일본 건축기준법 제28조(채광률) 및 시행령 제21조(반자높이) 판정 공식 날인이 완료되어, 
-          손해보험사 청구 및 확인인허가 신청 첨부 서류로 즉시 활용 가능합니다.
+          업로드한 도면의 법규 판정 결과입니다. 판정은 서버의 컴플라이언스 엔진이
+          산출하며, 데이터가 부족한 항목은 <strong className="text-neutral-300">판정 불가</strong>로
+          표시됩니다. 제출용 문서로 사용하기 전에 판정 근거를 반드시 확인하십시오.
         </p>
       </div>
 
-      {/* 리포트 카드 그리드 리스트 */}
-      <div className="space-y-6">
-        {reports.map((report) => (
-          <div key={report.id} className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 relative overflow-hidden transition-all duration-300 hover:border-neutral-700">
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-transparent pointer-events-none"></div>
-            
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-6">
-              <div className="space-y-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-extrabold px-2 py-0.5 bg-neutral-950 rounded text-neutral-400">ID: {report.id}</span>
-                  <span className="text-xs text-neutral-500 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>진단일: {report.inspectDate}</span>
+      {isLoading ? (
+        <div className="flex items-center gap-3 text-neutral-500 text-sm py-12 justify-center">
+          <RefreshCw className="w-4 h-4 animate-spin" />
+          <span>프로젝트 목록을 불러오는 중...</span>
+        </div>
+      ) : loadError ? (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-red-300 text-sm font-semibold">목록을 불러올 수 없습니다</p>
+            <p className="text-red-400/80 text-xs mt-1">{loadError}</p>
+          </div>
+          <button
+            onClick={loadProjects}
+            className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs rounded-lg cursor-pointer"
+          >
+            다시 시도
+          </button>
+        </div>
+      ) : projects.length === 0 ? (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-10 text-center">
+          <p className="text-neutral-300 text-sm font-semibold mb-1">아직 업로드된 도면이 없습니다</p>
+          <p className="text-neutral-500 text-xs">
+            대시보드에서 도면 PDF를 업로드하면 이곳에 판정 리포트가 생성됩니다.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {projects.map((project) => {
+            const status = STATUS_LABEL[project.status] ?? {
+              text: project.status,
+              className: "bg-neutral-700/20 text-neutral-300 border-neutral-600",
+            };
+            const report = reports[project.id];
+            const isExpanded = expandedId === project.id;
+            const error = reportErrors[project.id];
+
+            return (
+              <div
+                key={project.id}
+                className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5"
+              >
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div className="space-y-1.5 min-w-0">
+                    <h4 className="text-sm font-bold text-white truncate">
+                      {project.original_filename}
+                    </h4>
+                    <div className="flex items-center gap-3 text-xs text-neutral-500">
+                      {project.created_at && (
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5" />
+                          {new Date(project.created_at).toLocaleDateString("ja-JP")}
+                        </span>
+                      )}
+                      <span className="font-mono">{project.id.slice(0, 8)}</span>
+                    </div>
+                  </div>
+
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold border ${status.className}`}>
+                    {status.text}
                   </span>
                 </div>
-                <h4 className="text-base font-bold text-white leading-normal">{report.projectName}</h4>
+
+                {project.status === "error" && project.error_message && (
+                  <p className="mt-3 text-xs text-red-400/90 bg-red-500/5 border border-red-500/20 rounded-lg px-3 py-2">
+                    처리 실패: {project.error_message}
+                  </p>
+                )}
+
+                {error && (
+                  <p className="mt-3 text-xs text-amber-400/90 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
+                    {error}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <button
+                    onClick={() => loadCompliance(project.id)}
+                    className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold rounded-lg flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    <span>판정 조회</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleDownloadPDF(project.id)}
+                    disabled={downloadingId === project.id}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-xs font-semibold rounded-lg flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    {downloadingId === project.id ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    <span>PDF 내려받기</span>
+                  </button>
+                </div>
+
+                {isExpanded && report && (
+                  <div className="mt-4 p-4 bg-neutral-950 rounded-xl border border-neutral-800">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">
+                        서버 판정 결과
+                      </span>
+                      <span
+                        className={`text-xs font-bold px-2.5 py-1 rounded-md border ${
+                          report.total_violations === 0
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            : "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                        }`}
+                      >
+                        위반 {report.total_violations}건
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                      {report.room_results.map((room) => {
+                        const fails = room.evaluations.filter((e) => e.status === "FAIL");
+                        return (
+                          <div key={room.room_id} className="text-xs">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-neutral-200">
+                                Room {room.room_id}
+                              </span>
+                              <span className="text-neutral-500">({room.room_kind})</span>
+                              {fails.length === 0 && (
+                                <span className="text-emerald-400">위반 없음</span>
+                              )}
+                            </div>
+                            {fails.map((f) => (
+                              <div key={f.rule_id} className="pl-3 text-orange-400/90">
+                                · [{f.rule_id}] {f.reason ?? f.rule_name}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                      {report.room_results.length === 0 && (
+                        <p className="text-xs text-neutral-500">
+                          판정 대상 공간이 없습니다.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-
-              <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider ${report.complianceStatus === "PASS" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-orange-500/10 text-orange-400 border border-orange-500/20 animate-pulse"}`}>
-                {report.complianceStatus === "PASS" ? "適合 (PASS)" : "一部不適合 (WARNING)"}
-              </span>
-            </div>
-
-            {/* 검격 요약표 */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-neutral-950 rounded-2xl border border-neutral-800/80 mb-6 text-xs text-neutral-300">
-              <div className="space-y-1">
-                <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest block">채광/환기 검격 (건축법 제28조)</span>
-                <span className="font-semibold text-neutral-200">{report.lightVerdict}</span>
-              </div>
-              <div className="space-y-1">
-                <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest block">반자 높이 검격 (시행령 제21조)</span>
-                <span className="font-semibold text-neutral-200">{report.heightVerdict}</span>
-              </div>
-              <div className="space-y-1">
-                <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest block">일본 구분소유법 누수 판정</span>
-                <span className="font-semibold text-blue-400 flex items-center gap-1.5 mt-0.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-400" />
-                  <span>{report.leakOpinion}</span>
-                </span>
-              </div>
-            </div>
-
-            {/* 다운로드 버튼 */}
-            <button
-              onClick={() => handleDownloadPDF(report.id)}
-              disabled={downloadingId === report.id}
-              className="px-5 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-blue-500/20 flex items-center gap-2 cursor-pointer transition-colors"
-            >
-              {downloadingId === report.id ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>합격서 생성 중...</span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-3.5 h-3.5" />
-                  <span>검격 합격 증명서 (PDF) 다운로드</span>
-                </>
-              )}
-            </button>
-
-          </div>
-        ))}
-      </div>
-
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

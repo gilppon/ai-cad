@@ -173,16 +173,39 @@ def test_s4_unsigned_webhook_rejected_even_with_flag_in_production(monkeypatch):
     assert res["status"] == "error"
 
 
-def test_s4_unsigned_webhook_allowed_with_explicit_flag():
-    monkey_env = pytest.MonkeyPatch()
-    try:
-        monkey_env.setenv("PAYMENT_ALLOW_MOCK_WEBHOOK", "1")
-        fake_db = MagicMock()
-        fake_db.table.return_value = FakeTable([])
-        res = StripePaymentService.verify_and_apply_webhook(WEBHOOK_BODY, None, fake_db)
-        assert res["status"] in ("success", "fallback_success")
-    finally:
-        monkey_env.undo()
+def test_s4_unsigned_webhook_denied_when_env_unset(monkeypatch):
+    """
+    ENV 미설정은 개발 환경 화이트리스트에 없으므로 서명 없는 웹훅을 거부한다.
+
+    과거 계약(`ENV != "production"`)은 ENV 미설정 시 항상 허용으로 평가되어,
+    운영 배포에서 ENV 를 빼먹기만 해도 무서명 웹훅으로 크레딧을 충전할 수 있었다.
+    """
+    monkeypatch.delenv("ENV", raising=False)
+    monkeypatch.setenv("PAYMENT_ALLOW_MOCK_WEBHOOK", "1")
+    res = StripePaymentService.verify_and_apply_webhook(WEBHOOK_BODY, None, MagicMock())
+    assert res["status"] == "error"
+
+
+def test_s4_unsigned_webhook_allowed_with_explicit_flag(monkeypatch):
+    """
+    비운영 ENV + 명시적 플래그 두 조건이 모두 충족될 때만 서명 없는 웹훅을 허용한다.
+
+    SP6/P0-8: mock 허용 판정은 호출 시점에 평가된다 (과거: 모듈 임포트 시점 스냅샷으로
+    인해 프로세스 기동 후 환경 변경이 반영되지 않았다).
+    """
+    monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("PAYMENT_ALLOW_MOCK_WEBHOOK", "1")
+
+    fake_db = MagicMock()
+    fake_db.table.return_value = FakeTable([])
+    # 웹훅은 service_role 클라이언트로 멱등 선점 테이블에 기록한다
+    monkeypatch.setattr(
+        StripePaymentService, "_service_db", classmethod(lambda cls: fake_db)
+    )
+
+    res = StripePaymentService.verify_and_apply_webhook(WEBHOOK_BODY, None, fake_db)
+    # "fallback_success" 는 폐지되었다: DB 반영 실패를 성공으로 위장하지 않는다 (C6)
+    assert res["status"] == "success"
 
 
 # ================================================================
@@ -289,8 +312,14 @@ def test_l2_checksheet_without_data_returns_judgment_impossible(monkeypatch):
         if name == "profiles":
             return FakeTable([{"id": "user_123", "plan_type": "free", "credits": 10}])
         if name == "projects":
-            t = FakeTable([])
-            return t
+            # SP6/P0-1: 소유권 검증이 강제되므로 본인 소유 프로젝트를 넣어야 한다.
+            #   과거에는 소유권 검증 실패를 try/except 로 삼키고 가짜 프로젝트를
+            #   조립해 200 을 반환했다(IDOR 우회). 이제 미소유는 404 다.
+            #   이 테스트의 검증 대상은 "평가 데이터 부재"이므로, 프로젝트는
+            #   존재하고 소유하되 page0_compliance.json 만 없는 상태로 둔다.
+            return FakeTable([
+                {"id": project_id, "user_id": "user_123", "original_filename": "nodata.pdf"}
+            ])
         return FakeTable([])
 
     fake_db.table.side_effect = table

@@ -12,6 +12,23 @@ import { getLocalSession, UserSession } from "@/utils/supabase";
 import { getAuthHeaders } from "@/utils/apiAuth";
 import { API_BASE_URL } from "@/utils/api";
 
+/** GET /api/v1/projects 응답 항목 (서버가 user_id 스코프를 강제한다) */
+interface DashboardProject {
+  id: string;
+  original_filename: string | null;
+  status: string | null;
+  error_message: string | null;
+  created_at: string | null;
+}
+
+/** 뷰어에 주입되는 실측 씬. 모든 값은 백엔드 응답에서만 온다. */
+interface SceneData {
+  walls: any[];
+  rooms: any[];
+  leakSources: any[];
+  damageZones: any[];
+}
+
 export default function DashboardPage() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [hudTab, setHudTab] = useState<"summary" | "geology" | "inspect" | "construction" | "fire" | "pipeline">("summary");
@@ -73,7 +90,17 @@ export default function DashboardPage() {
             
             // Extract project id from result
             const result = statusData.result || {};
-            const projectId = result.project_id || "mock_project_123";
+            // SP6/P0-4: 실패 시 하드코딩된 가짜 프로젝트 ID 로 폴백하지 않는다.
+            //   존재하지 않는 데모 도면이 결제 고객에게 표시되던 결함 (C2).
+            const projectId = result.project_id;
+            if (!projectId) {
+              clearInterval(interval);
+              setIsUploading(false);
+              setUploadProgress("");
+              setProjectsError("変換は完了しましたが、プロジェクトIDを取得できませんでした。");
+              return;
+            }
+            setReloadNonce(n => n + 1);
             
             alert("CAD 2D-to-3D IFC reconstruction successful! Entering Workspace...");
             window.location.href = `/dashboard/editor?project_id=${projectId}`;
@@ -105,95 +132,141 @@ export default function DashboardPage() {
     setSession(getLocalSession());
   }, []);
 
-  // 3D 뷰어에 주입할 HUD 모드별 실시간 3D 기하 데이터셋 (동적 갱신 모사)
-  const get3DDataByHudTab = () => {
-    // 기본 건물 외곽 벽 & 룸
-    const baseWalls = [
-      { id: 1, p1: { x: 40, y: 40 }, p2: { x: 360, y: 40 }, thickness_px: 12 },
-      { id: 2, p1: { x: 360, y: 40 }, p2: { x: 360, y: 260 }, thickness_px: 12 },
-      { id: 3, p1: { x: 360, y: 260 }, p2: { x: 40, y: 260 }, thickness_px: 12 },
-      { id: 4, p1: { x: 40, y: 260 }, p2: { x: 40, y: 40 }, thickness_px: 12 },
-      // 내부 칸막이벽
-      { id: 5, p1: { x: 200, y: 40 }, p2: { x: 200, y: 260 }, thickness_px: 8 },
-      { id: 6, p1: { x: 200, y: 150 }, p2: { x: 360, y: 150 }, thickness_px: 8 }
-    ];
+  const [projects, setProjects] = useState<DashboardProject[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [scene, setScene] = useState<SceneData>({ walls: [], rooms: [], leakSources: [], damageZones: [] });
+  const [sceneLoading, setSceneLoading] = useState(false);
+  const [sceneError, setSceneError] = useState<string | null>(null);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
-    const baseRooms = [
-      {
-        id: 1,
-        polygon: [{ x: 40, y: 40 }, { x: 200, y: 40 }, { x: 200, y: 260 }, { x: 40, y: 260 }],
-        kind: hudTab === "construction" ? "ldk" : "toilet",
-        area_m2: 32.4
-      },
-      {
-        id: 2,
-        polygon: [{ x: 200, y: 40 }, { x: 360, y: 40 }, { x: 360, y: 150 }, { x: 200, y: 150 }],
-        kind: hudTab === "pipeline" ? "shaft" : "bedroom",
-        area_m2: 18.5
-      },
-      {
-        id: 3,
-        polygon: [{ x: 200, y: 150 }, { x: 360, y: 150 }, { x: 360, y: 260 }, { x: 200, y: 260 }],
-        kind: hudTab === "fire" ? "kitchen" : "toilet",
-        area_m2: 15.2
+  // ── 실측 프로젝트 데이터 로딩 ─────────────────────────────────────────────
+  // (과거: 이 파일은 벽 6개 · 룸 3개 · 누수원 1개를 하드코딩한 데모 지오메트리를
+  //  "TOKYO-AOYAMA-MOCK-201" 이라는 가짜 씬 이름으로 렌더링했다. 결제 고객이
+  //  로그인하면 실존하지 않는 건물이 보이는 치명적 결함이었다 (C2).
+  //  현재: GET /api/v1/projects -> /geometry -> /incident 실측 데이터만 렌더링한다.)
+
+  // 내 프로젝트 목록 조회. 서버가 .eq("user_id") 와 RLS 로 타 테넌트를 차단한다.
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+
+    const loadProjects = async () => {
+      setProjectsError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${API_BASE_URL}/api/v1/projects`, { headers });
+        if (!res.ok) {
+          throw new Error(`プロジェクト一覧の取得に失敗しました (HTTP ${res.status})`);
+        }
+        const data = await res.json();
+        if (cancelled) return;
+        const list: DashboardProject[] = data.projects || [];
+        setProjects(list);
+        setSelectedProjectId(prev => prev ?? (list.length > 0 ? list[0].id : null));
+      } catch (err: any) {
+        if (cancelled) return;
+        // 폴백 금지: 실패 시 빈 목록 + 오류 배너 (0.5)
+        setProjects([]);
+        setSelectedProjectId(null);
+        setProjectsError(err?.message || "プロジェクト一覧を取得できませんでした。");
       }
-    ];
+    };
 
-    switch (hudTab) {
-      case "geology":
-        return {
-          walls: baseWalls.map(w => ({ ...w, thickness_px: w.thickness_px + 4 })),
-          rooms: baseRooms.map(r => ({ ...r, kind: "ldk" })),
-          leakSources: [],
-          damageZones: []
-        };
-      case "inspect":
-        return {
-          walls: baseWalls,
-          rooms: baseRooms,
-          leakSources: [
-            { point: { x: 280, y: 95 }, room_id: 2, description: "天井配管継手部から微細漏水検出" }
-          ],
-          damageZones: [
-            { id: 1, damage_type: "leak", severity: "high", polygon: [{ x: 240, y: 60 }, { x: 320, y: 60 }, { x: 320, y: 130 }, { x: 240, y: 130 }], room_id: 2 }
-          ]
-        };
-      case "construction":
-        return {
-          walls: baseWalls.map(w => ({ ...w, thickness_px: 4 })),
-          rooms: baseRooms,
-          leakSources: [],
-          damageZones: []
-        };
-      case "fire":
-        return {
-          walls: baseWalls,
-          rooms: baseRooms,
-          leakSources: [],
-          damageZones: [
-            { id: 2, damage_type: "fire_hazard", severity: "warning", polygon: [{ x: 200, y: 150 }, { x: 360, y: 150 }, { x: 360, y: 260 }, { x: 200, y: 260 }], room_id: 3 }
-          ]
-        };
-      case "pipeline":
-        return {
-          walls: baseWalls,
-          rooms: baseRooms.map(r => r.id === 2 ? { ...r, kind: "shaft" } : r),
-          leakSources: [
-            { point: { x: 300, y: 90 }, room_id: 2, description: "PS 排水立管継手部" }
-          ],
-          damageZones: []
-        };
-      default:
-        return {
-          walls: baseWalls,
-          rooms: baseRooms,
-          leakSources: [],
-          damageZones: []
-        };
+    loadProjects();
+    return () => { cancelled = true; };
+  }, [session, reloadNonce]);
+
+  // 선택된 프로젝트의 실측 지오메트리 + 인시던트(누수원/피해구역) 조회
+  useEffect(() => {
+    if (!session || !selectedProjectId) {
+      setScene({ walls: [], rooms: [], leakSources: [], damageZones: [] });
+      return;
     }
-  };
+    let cancelled = false;
 
-  const current3DData = get3DDataByHudTab();
+    const loadScene = async () => {
+      setSceneLoading(true);
+      setSceneError(null);
+      try {
+        const headers = await getAuthHeaders();
+
+        const geomRes = await fetch(
+          `${API_BASE_URL}/api/v1/projects/${selectedProjectId}/geometry`,
+          { headers }
+        );
+        if (!geomRes.ok) {
+          // 404 = 아직 변환 결과 없음. 조작된 폴백 지오메트리를 넣지 않는다.
+          throw new Error(
+            geomRes.status === 404
+              ? "この図面の3Dジオメトリはまだ生成されていません。"
+              : `ジオメトリ取得に失敗しました (HTTP ${geomRes.status})`
+          );
+        }
+        const geom = await geomRes.json();
+
+        // 인시던트(누수 사고 데이터)는 미등록일 수 있으므로 404 는 정상으로 처리한다.
+        let leakSources: any[] = [];
+        let damageZones: any[] = [];
+        try {
+          const incRes = await fetch(
+            `${API_BASE_URL}/api/v1/projects/${selectedProjectId}/incident`,
+            { headers }
+          );
+          if (incRes.ok) {
+            const inc = await incRes.json();
+            leakSources = inc?.data?.leak_sources || [];
+            damageZones = inc?.data?.damage_zones || [];
+          }
+        } catch {
+          // 인시던트 미등록은 오류가 아니다. 빈 배열로 둔다.
+        }
+
+        if (cancelled) return;
+        setScene({
+          walls: geom.walls || [],
+          rooms: geom.rooms || [],
+          leakSources,
+          damageZones,
+        });
+      } catch (err: any) {
+        if (cancelled) return;
+        setScene({ walls: [], rooms: [], leakSources: [], damageZones: [] });
+        setSceneError(err?.message || "3Dジオメトリを読み込めませんでした。");
+      } finally {
+        if (!cancelled) setSceneLoading(false);
+      }
+    };
+
+    loadScene();
+    return () => { cancelled = true; };
+  }, [session, selectedProjectId, reloadNonce]);
+
+  // HUD 탭은 표시/조명 모드만 전환한다.
+  // (과거: 탭에 따라 room.kind 를 "toilet" -> "ldk" 로 재작성하거나 thickness_px 를
+  //  임의 증감시켜 실측 도면과 다른 형상을 표시했다 (C2). 실측값은 절대 덮어쓰지
+  //  않는다. 표시 모드는 ThreeDViewer 의 hudTab prop 으로 위임한다.)
+  const current3DData = scene;
+
+  // 뷰어 오버레이 상태. 폴백 대신 명시적 상태를 노출한다 (Phase 0 / 0.5).
+  const viewerNotice: { message: string; retryable: boolean } | null = (() => {
+    if (!session) return { message: "ログインしてください。", retryable: false };
+    if (projectsError) return { message: projectsError, retryable: true };
+    if (sceneError) return { message: sceneError, retryable: true };
+    if (projects.length === 0) {
+      return {
+        message: "図面がまだアップロードされていません。左のパネルから PDF をアップロードしてください。",
+        retryable: false,
+      };
+    }
+    if (current3DData.walls.length === 0 && current3DData.rooms.length === 0) {
+      return {
+        message: "このプロジェクトの3Dジオメトリはまだ生成されていません。",
+        retryable: true,
+      };
+    }
+    return null;
+  })();
 
   return (
     <div className="min-h-screen bg-[#030306] text-white p-2 md:p-4 font-sans select-none overflow-x-hidden relative">
@@ -440,7 +513,24 @@ export default function DashboardPage() {
             <div className="flex justify-between items-center mb-3 bg-neutral-950/80 px-4 py-2.5 rounded-xl border border-neutral-900/70 shadow-lg">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
-                <span className="text-xs font-mono text-neutral-300">ACTIVE SCENE: <span className="text-blue-400 font-black tracking-wider">TOKYO-AOYAMA-MOCK-201</span></span>
+                <span className="text-xs font-mono text-neutral-300 flex items-center gap-2">ACTIVE SCENE:
+                  {projects.length === 0 ? (
+                    <span className="text-neutral-500 font-black tracking-wider">NO PROJECT</span>
+                  ) : (
+                    <select
+                      value={selectedProjectId ?? ""}
+                      onChange={(e) => setSelectedProjectId(e.target.value)}
+                      aria-label="表示するプロジェクトを選択"
+                      className="bg-neutral-900 border border-neutral-700 text-blue-400 font-black tracking-wider text-xs font-mono rounded px-2 py-1 outline-none focus:border-blue-500 cursor-pointer max-w-[200px]"
+                    >
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.original_filename || p.id}{p.status === "failed" ? " (変換失敗)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </span>
               </div>
               
               {/* 층수 오버레이 탭선택 */}
@@ -459,15 +549,35 @@ export default function DashboardPage() {
 
             {/* 3D WebGL 빌딩 뷰어 마운트 (Three.js 이식 완료) */}
             <div className="relative w-full h-[450px] md:h-[500px] flex-grow rounded-2xl overflow-hidden border border-neutral-900/80 shadow-2xl">
-              <ThreeDViewer 
+              <ThreeDViewer
                 walls={current3DData.walls}
                 rooms={current3DData.rooms}
                 leakSources={current3DData.leakSources}
                 damageZones={current3DData.damageZones}
-                isLoading={false}
+                isLoading={sceneLoading}
                 hudTab={hudTab}
                 selectedFloor={selectedFloor}
               />
+
+              {/* 폴백 금지 (Phase 0 / 0.5): 데이터가 없으면 가짜 건물을 렌더링하지 않고
+                  상태를 명시적으로 노출한다. 과거에는 이 자리에서 데모 지오메트리가
+                  무조건 표시되어, 미변환·실패 상태가 성공으로 오인되었다. */}
+              {!sceneLoading && viewerNotice && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-neutral-950/85 backdrop-blur-sm px-8 text-center">
+                  <ShieldAlert className="w-8 h-8 text-amber-400" />
+                  <p className="text-sm font-bold text-neutral-200 leading-relaxed max-w-md">
+                    {viewerNotice.message}
+                  </p>
+                  {viewerNotice.retryable && (
+                    <button
+                      onClick={() => setReloadNonce(n => n + 1)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      再読み込み
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 하단 미래형 HUD 렌더링 필터 탭 (스크린샷 버튼 매핑) */}

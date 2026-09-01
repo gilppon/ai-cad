@@ -1,5 +1,6 @@
 # room_semantics.py
 import math
+from core.units import RASTER_PIXEL_TO_MM
 from typing import List, Dict, Any
 from domain.models import RoomKind
 
@@ -43,7 +44,7 @@ def classify_room(poly: List[Dict[str, float]], pixel_to_mm: float) -> RoomKind:
     
     return RoomKind.LIVING
 
-def classify_rooms(rooms: List[Any], width: int, height: int, pixel_to_mm: float = 5.0) -> None:
+def classify_rooms(rooms: List[Any], width: int, height: int, pixel_to_mm: float = RASTER_PIXEL_TO_MM) -> None:
     """
     Batch classification of rooms. Updates the 'kind' attribute of each room object.
     """

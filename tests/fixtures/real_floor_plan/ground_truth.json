@@ -1,0 +1,261 @@
+{
+  "_comment": "본 정답지는 sample.jpg 의 가시 라벨·치수 주석에서 직접 추출한 값이다. 미라벨링 구역(洗面·トイレ·玄関·LDK)의 면적은 도면 비율에서 산출한 추정치이며 대표님 검증이 필요하다.",
+  "source": {
+    "image": "tests/fixtures/real_floor_plan/sample.jpg",
+    "building_outline_mm": {
+      "width": 5622,
+      "height": 11553
+    },
+    "building_outline_m2": 64.97,
+    "type": "1LDK (일본 1인~2인 거구)"
+  },
+  "rooms": [
+    {
+      "id": "UB",
+      "name_ja": "UB (ユニットバス)",
+      "name_ko": "유닛버스",
+      "area_jo": null,
+      "area_m2": 1.92,
+      "label_explicit": true,
+      "notes": "1216 = 1200x1600mm, 욕조 포함"
+    },
+    {
+      "id": "PS",
+      "name_ja": "PS (パイプシャフト)",
+      "name_ko": "배관 샤프트",
+      "area_jo": null,
+      "area_m2": 0.04,
+      "label_explicit": true,
+      "notes": "60mm 폭"
+    },
+    {
+      "id": "MB",
+      "name_ja": "MB (メーターボックス)",
+      "name_ko": "계량기함",
+      "area_jo": null,
+      "area_m2": 0.51,
+      "label_explicit": true,
+      "notes": "760mm 폭"
+    },
+    {
+      "id": "GIK",
+      "name_ja": "給湯器",
+      "name_ko": "온수기",
+      "area_jo": null,
+      "area_m2": 0.5,
+      "label_explicit": true,
+      "notes": "1252mm 폭 알코브"
+    },
+    {
+      "id": "WG",
+      "name_ja": "WG (洗濯機置場)",
+      "name_ko": "세탁기",
+      "area_jo": null,
+      "area_m2": 0.86,
+      "label_explicit": true,
+      "notes": "1200x720 추정"
+    },
+    {
+      "id": "SEN",
+      "name_ja": "洗面",
+      "name_ko": "세면실",
+      "area_jo": null,
+      "area_m2": 2.1,
+      "label_explicit": false,
+      "notes": "WD1 출입"
+    },
+    {
+      "id": "TOI",
+      "name_ja": "トイレ",
+      "name_ko": "화장실",
+      "area_jo": null,
+      "area_m2": 0.95,
+      "label_explicit": false,
+      "notes": "WD4 출입"
+    },
+    {
+      "id": "GEN",
+      "name_ja": "玄関",
+      "name_ko": "현관",
+      "area_jo": null,
+      "area_m2": 4.64,
+      "label_explicit": false,
+      "notes": "WD3 + WD2 (하타바코 포함)"
+    },
+    {
+      "id": "WIC",
+      "name_ja": "WIC",
+      "name_ko": "워크인클로젯",
+      "area_jo": 2.8,
+      "area_m2": 4.54,
+      "label_explicit": true,
+      "notes": "WD6 출입, 상부보형"
+    },
+    {
+      "id": "BED",
+      "name_ja": "個 (個室)",
+      "name_ko": "침실",
+      "area_jo": 4.7,
+      "area_m2": 7.61,
+      "label_explicit": true,
+      "notes": "WD7 + WD8"
+    },
+    {
+      "id": "LDK",
+      "name_ja": "LDK",
+      "name_ko": "거실+주방+식당",
+      "area_jo": null,
+      "area_m2": 22.3,
+      "label_explicit": false,
+      "notes": "I형 2550mm 키친, WD8 진입, 1.82 라벨은 별도 섹션"
+    },
+    {
+      "id": "KOM",
+      "name_ja": "小上り",
+      "name_ko": "단상 (코마아가리)",
+      "area_jo": 2.0,
+      "area_m2": 3.24,
+      "label_explicit": true,
+      "notes": "WD9, 770x1950 + 1000x2150 이불"
+    },
+    {
+      "id": "STO",
+      "name_ja": "収納 (廊下/玄関)",
+      "name_ko": "수납장",
+      "area_jo": null,
+      "area_m2": 1.2,
+      "label_explicit": true,
+      "notes": "복도측 + 현관측 통합"
+    },
+    {
+      "id": "FRG",
+      "name_ja": "冷蔵庫置場",
+      "name_ko": "냉장고 자리",
+      "area_jo": null,
+      "area_m2": 0.6,
+      "label_explicit": true,
+      "notes": "650x900 추정"
+    }
+  ],
+  "doors": [
+    {
+      "id": "WD1",
+      "connects": [
+        "SEN",
+        "CORRIDOR"
+      ],
+      "swings_into": "CORRIDOR"
+    },
+    {
+      "id": "WD2",
+      "connects": [
+        "GEN",
+        "CORRIDOR"
+      ],
+      "swings_into": "CORRIDOR"
+    },
+    {
+      "id": "WD3",
+      "connects": [
+        "GEN",
+        "STO"
+      ],
+      "swings_into": "STO"
+    },
+    {
+      "id": "WD4",
+      "connects": [
+        "TOI",
+        "CORRIDOR"
+      ],
+      "swings_into": "CORRIDOR"
+    },
+    {
+      "id": "WD5",
+      "connects": [
+        "SEN",
+        "TOI"
+      ],
+      "swings_into": "SEN"
+    },
+    {
+      "id": "WD6",
+      "connects": [
+        "CORRIDOR",
+        "WIC"
+      ],
+      "swings_into": "WIC"
+    },
+    {
+      "id": "WD7",
+      "connects": [
+        "CORRIDOR",
+        "BED"
+      ],
+      "swings_into": "BED"
+    },
+    {
+      "id": "WD8",
+      "connects": [
+        "LDK",
+        "BED"
+      ],
+      "swings_into": "BED"
+    },
+    {
+      "id": "WD9",
+      "connects": [
+        "LDK",
+        "KOM"
+      ],
+      "swings_into": "KOM"
+    }
+  ],
+  "structural": {
+    "load_bearing_walls_ja": "구체벽",
+    "upper_beam_zones_ja": "상부보 / 상부보형",
+    "load_bearing_count": 6,
+    "beam_zone_count": 4
+  },
+  "appliances": [
+    {
+      "type": "kitchen",
+      "shape": "I형",
+      "length_mm": 2550
+    },
+    {
+      "type": "bath",
+      "size_label": "1216"
+    },
+    {
+      "type": "refrigerator",
+      "size_mm_estimated": [
+        650,
+        900
+      ]
+    },
+    {
+      "type": "furniture",
+      "label": "단일 이불",
+      "size_mm": [
+        770,
+        1950
+      ]
+    },
+    {
+      "type": "furniture",
+      "label": "더블 이불",
+      "size_mm": [
+        1000,
+        2150
+      ]
+    }
+  ],
+  "summary_counts": {
+    "rooms_total": 14,
+    "rooms_labeled_with_jo": 4,
+    "rooms_unlabeled_estimated": 7,
+    "doors_total": 9,
+    "structural_load_bearing": 6
+  }
+}

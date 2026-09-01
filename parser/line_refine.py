@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any
+from core import planar as _planar
+from typing import List, Tuple, Dict, Any, Set
 import math
 
 
@@ -340,6 +341,60 @@ def merge_parallel_pairs(lines: List[Line], angle_tol: float = 2.0, dist_tol: fl
         i = j
 
     return dedup_exact(merged)
+
+
+# -----------------------------
+# Planar subdivision (PSLG precondition)
+# -----------------------------
+def subdivide_at_intersections(
+    lines: List[Line],
+    min_piece: float = 1.0,
+) -> List[Line]:
+    """
+    평면 분할: 축 정렬 세그먼트를 모든 교차점에서 분할한다.
+
+    구현은 core/planar.py 가 유일한 SSOT이며, 본 함수는 Line <-> tuple 어댑터다.
+
+    ------------------------------------------------------------------
+    왜 이 단계가 필수인가 (결함 C10 근본 원인)
+    ------------------------------------------------------------------
+    CAD 벡터 도면은 교차점에서 쪼개지지 않은 '긴 선'으로 저장된다.
+    예) 8x8 격자의 가로선은 x=100..900 을 한 번에 긋는 세그먼트 1개.
+
+    이 상태로 위상 알고리즘을 돌리면 내부 정점이 존재하지 않아 전부 오작동한다.
+
+      * filter_structural_walls() 는 degree 를 '끝점 근접'으로만 계산한다.
+        내부 벽(x=200 세로선)의 끝점 (200,100)/(200,900) 은 다른 선의 끝점과
+        멀리 떨어져 있어 degree=0 -> 전부 삭제된다.
+        실측: 8x8 격자 16선 -> 외곽 4선만 생존, 64실 -> 1실.
+
+      * PSLG 최소 면(minimal face) 추출이 불가능하다.
+        내부 정점 자체가 없으므로 사이클이 외곽 하나만 산출된다.
+
+    따라서 본 함수는 '모든 위상 연산보다 먼저' 수행되어야 하는 전제 단계다.
+    snap_endpoints() 는 근접 끝점만 뭉개므로 이 역할을 대신할 수 없다.
+
+    Args:
+        lines: refine_lines() 을 거쳐 축 정렬된 Line 리스트
+        min_piece: 이 길이 미만의 조각은 폐기 (sub-pixel 슬리버 방지)
+
+    Returns:
+        교차점에서 분할되고 중복이 제거된 Line 리스트
+    """
+    if not lines:
+        return []
+
+    segs = [((float(l.x1), float(l.y1)), (float(l.x2), float(l.y2))) for l in lines]
+    out_segs = _planar.subdivide_segments(segs, min_piece=min_piece)
+
+    out: List[Line] = []
+    for (x1, y1), (x2, y2) in out_segs:
+        out.append(
+            _norm_endpoints(
+                Line(int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)))
+            )
+        )
+    return dedup_exact(out)
 
 
 # -----------------------------

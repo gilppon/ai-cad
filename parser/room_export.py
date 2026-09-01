@@ -7,6 +7,7 @@ import subprocess
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.units import RASTER_PIXEL_TO_MM
 from domain.models import Point, Room, RoomKind
 from pipeline.contracts import build_geometry_payload, build_processing_metadata
 from pipeline.paths import resolve_output_path, resolve_project_path
@@ -120,7 +121,7 @@ def rooms_to_json_dict(
             from .room_semantics import classify_room
             # convert poly_points to dict list for classify_room
             poly_dicts = [{"x": p.x, "y": p.y} for p in poly_points]
-            kind = classify_room(poly_dicts, pixel_to_mm or 5.0)
+            kind = classify_room(poly_dicts, pixel_to_mm or RASTER_PIXEL_TO_MM)
         
         area_px = _safe_float(getattr(r, "area_px", _poly_area(poly_points)))
         

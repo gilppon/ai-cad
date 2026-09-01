@@ -106,8 +106,18 @@ def setup_mocks(monkeypatch):
     app.dependency_overrides[get_current_user_and_db] = get_mock_user_and_db
     app.dependency_overrides[get_supabase_client] = lambda: GLOBAL_MOCK_DB
 
-    # SP1/S-4: 서명 없는 웹훅은 기본 거부. 본 E2E 테스트에서만 명시적으로 Mock 수신 플래그 활성화
+    # SP1/S-4 + SP6/P0-8: 서명 없는 웹훅과 mock 결제는 기본 거부된다.
+    # 본 E2E 테스트에서만 두 개의 열쇠를 모두 명시적으로 활성화한다.
+    #   1) PAYMENT_ALLOW_MOCK_WEBHOOK=1
+    #   2) ENV 가 개발 환경 화이트리스트에 포함 (ENV 미설정은 화이트리스트에 없다)
     monkeypatch.setenv("PAYMENT_ALLOW_MOCK_WEBHOOK", "1")
+    monkeypatch.setenv("ENV", "development")
+
+    # 웹훅·원장 처리는 service_role 클라이언트를 서비스 내부에서 직접 얻는다.
+    # FastAPI 의존성 오버라이드는 DI 경로에만 적용되므로 내부 접근자도 함께 교체한다.
+    monkeypatch.setattr(
+        StripePaymentService, "_service_db", classmethod(lambda cls: GLOBAL_MOCK_DB)
+    )
 
     # 각 테스트 시작 전 DB 상태 초기화 (독립성 확보)
     GLOBAL_MOCK_DB.table("profiles")._data = [

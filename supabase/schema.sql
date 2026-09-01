@@ -100,3 +100,92 @@ CREATE TRIGGER set_updated_at_projects
 BEFORE UPDATE ON public.projects
 FOR EACH ROW
 EXECUTE FUNCTION public.handle_updated_at();
+
+
+-- ===============================================================
+-- 3. 결제 멱등성 보관 테이블 (SP6/P0-8)
+-- ---------------------------------------------------------------
+-- Stripe 는 동일 이벤트를 1회 이상 전달(at-least-once)한다. 멱등 키가 없으면
+-- 재전달·재시도마다 크레딧이 중복 지급되어 매출이 유실된다.
+--
+-- RLS 를 활성화하고 정책은 의도적으로 두지 않는다 -> 오직 service_role
+-- (웹훅 수신 서버) 만 접근 가능하며, 사용자 토큰으로는 읽기/쓰기 불가.
+-- ===============================================================
+CREATE TABLE IF NOT EXISTS public.processed_payment_events (
+  event_id      TEXT PRIMARY KEY,
+  user_id       UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  plan_type     TEXT NOT NULL,
+  credits_added INTEGER NOT NULL,
+  processed_at  TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+ALTER TABLE public.processed_payment_events ENABLE ROW LEVEL SECURITY;
+-- 정책 없음 (service_role 전용)
+
+CREATE INDEX IF NOT EXISTS idx_processed_payment_events_user
+  ON public.processed_payment_events (user_id);
+
+
+-- ===============================================================
+-- 4. 크레딧 원자적 차감 RPC (SP6/P0-9)
+-- ---------------------------------------------------------------
+-- 애플리케이션의 SELECT -> UPDATE 분리 구조는 동시 요청에서 갱신 분실
+-- (lost update) 을 일으킨다. 잔액 1 인 상태에서 동시 2요청이 모두 통과해
+-- 잔액이 음수가 되거나 무료 사용이 발생한다. 단일 트랜잭션 + 행 잠금으로
+-- 차감의 원자성을 보장한다.
+--
+-- 호출 주체 검증: service_role(auth.uid() IS NULL) 은 통과하지만,
+-- 사용자 토큰으로 호출된 경우 본인 크레딧만 차감할 수 있다 (IDOR 방지).
+-- ===============================================================
+CREATE OR REPLACE FUNCTION public.deduct_credits(p_user_id UUID, p_amount INTEGER)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_plan    TEXT;
+  v_credits INTEGER;
+BEGIN
+  IF p_user_id IS NULL OR p_amount IS NULL OR p_amount <= 0 THEN
+    RETURN FALSE;
+  END IF;
+
+  -- 사용자 토큰 경로는 본인만 허용 (타인 크레딧 소진 공격 차단)
+  IF auth.uid() IS NOT NULL AND auth.uid() <> p_user_id THEN
+    RETURN FALSE;
+  END IF;
+
+  -- 행 잠금: 동시 차감 요청을 직렬화한다
+  SELECT plan_type, credits INTO v_plan, v_credits
+  FROM public.profiles
+  WHERE id = p_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN FALSE;
+  END IF;
+
+  -- Pro 플랜은 무제한이므로 차감하지 않는다
+  IF v_plan = 'pro' THEN
+    RETURN TRUE;
+  END IF;
+
+  IF v_credits < p_amount THEN
+    RETURN FALSE;
+  END IF;
+
+  UPDATE public.profiles
+  SET credits    = credits - p_amount,
+      updated_at = TIMEZONE('utc'::text, NOW())
+  WHERE id = p_user_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+-- service_role 만 실행 권한을 가진다 (anon/authenticated 은 호출 불가)
+REVOKE ALL ON FUNCTION public.deduct_credits(UUID, INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.deduct_credits(UUID, INTEGER) FROM anon;
+REVOKE ALL ON FUNCTION public.deduct_credits(UUID, INTEGER) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.deduct_credits(UUID, INTEGER) TO service_role;

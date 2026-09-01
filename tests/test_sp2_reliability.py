@@ -216,18 +216,32 @@ def test_l3_checksheet_calculated_value_from_facts(monkeypatch):
 
     fake_db = MagicMock()
 
+    def make_chain(rows):
+        """
+        임의 길이의 PostgREST 체인을 지원하는 목.
+
+        SP6/P0-1: 소유권 검증이 `.eq("id", ...).eq("user_id", ...)` 2단 체인으로
+        바뀌었다. `.eq()` 가 자기 자신을 반환하도록 만들어 체인 길이에
+        의존하지 않게 한다 (기존 목은 단일 .eq() 만 지원해 깨졌다).
+        """
+        chain = MagicMock()
+        chain.execute.return_value = rows
+        chain.eq.return_value = chain
+        return chain
+
     def table(name):
         if name == "profiles":
             rows = MagicMock()
             rows.data = [{"id": "user_sp2", "plan_type": "free", "credits": 10}]
             t = MagicMock()
-            t.select.return_value.eq.return_value.execute.return_value = rows
+            t.select.return_value = make_chain(rows)
+            t.update.return_value = make_chain(rows)
             return t
         if name == "projects":
             rows = MagicMock()
             rows.data = [{"id": project_id, "original_filename": "sp2_test.pdf"}]
             t = MagicMock()
-            t.select.return_value.eq.return_value.execute.return_value = rows
+            t.select.return_value = make_chain(rows)
             return t
         return MagicMock()
 

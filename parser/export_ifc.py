@@ -2,6 +2,7 @@
 import os
 import json
 import math
+from core.units import RASTER_PIXEL_TO_MM
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -128,7 +129,7 @@ def build_ifc_from_multi_floor(payloads: List[dict], *, out_ifc: str):
         storey.Elevation = elevation_m
 
         scale = payload.get("scale", {}) or {}
-        px_to_mm = float(scale.get("pixel_to_mm", 5.0))
+        px_to_mm = float(scale.get("pixel_to_mm", RASTER_PIXEL_TO_MM))
         
         floor_h_mm = float(payload.get("metadata", {}).get("floor_height_mm", 2400.0))
         wall_h_m = _mm_to_m(floor_h_mm)
