@@ -9,10 +9,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-LAWS_DIR = Path("e:/project/cad_saas_mvp/data/laws")
+# STATE G5: 레포 상대경로 (구 e:/project/cad_saas_mvp 절대경로는 폐기)
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+LAWS_DIR = _REPO_ROOT / "data" / "laws"
 LAW_TARGETS = {
     "325AC0000000201": "建築基準法 (Building Standards Act)",
-    "325CO0000000338": "建築基準法施行令 (Building Standards Act Enforcement Order)"
+    "325CO0000000338": "建築基準法施行令 (Building Standards Act Enforcement Order)",
+    "427AC0000000053": "建築物のエネルギー消費の合理性に関する法律 (建築物省エネ法)",
 }
 API_BASE_URL = "https://laws.e-gov.go.jp/api/1/lawdata"
 

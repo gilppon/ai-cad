@@ -144,8 +144,8 @@ async def convert_pdf(
     except Exception as e:
         logger.warning(f"[Harness Fallback] Failed to update project status in Supabase: {str(e)}")
 
-    # 3. Celery Task 호출
-    task = process_pdf_task.delay(file_path, project_id)
+    # 3. Celery Task 호출 (STATE: 소유권 증명 user_id 전달 — 워커 fail-closed)
+    task = process_pdf_task.delay(file_path, project_id, user_id)
     
     return TaskResponse(
         task_id=task.id,

@@ -1,8 +1,9 @@
 """e-Gov 실코퍼스 하이브리드 검색 (SP4/D2.2).
 
-레포 내부 ChromaDB(vector_store/chromadb, 926청크: 建築基準法+施行令)를 대상으로
-키워드 서브스트링 점수(정확성)와 임베딩 랭크(의미 유사도)를 결합한
-결정론적 하이브리드 검색을 제공한다.
+1순위: 레포 내부 ChromaDB(vector_store/chromadb).
+2순위(STATE G5): ChromaDB 부재 시 data/laws/*.xml 직접 파싱 폴백.
+  검색식이 완전 렉시컬이라 임베딩 없이도 동일 채점이 가능하며,
+  fresh 환경(CI)에서도 매트릭스가 코퍼스 부재로 거짓 실패하지 않는다.
 
 골든셋(GOLDEN_QUERIES)은 실제 e-Gov XML 판본에서 검증된 조문 매핑만 포함한다.
 """
@@ -48,16 +49,43 @@ _LEX_CACHE: Optional[Dict[str, Any]] = None
 
 
 def _load_lexicon() -> Optional[Dict[str, Any]]:
-    """전체 청크 문서·메타를 1회 로드하여 캐시 (926청크 ≈ 수 MB 내외)."""
+    """전체 청크 문서·메타를 1회 로드하여 캐시. 부재·파손 시 XML 직접 폴백."""
     global _LEX_CACHE
     if _LEX_CACHE is not None:
         return _LEX_CACHE
-    col = _get_collection()
-    if col is None:
+    # 1순위: ChromaDB (읽기 실패해도 폴백 — 예: 비ASCII 경로의 HNSW 리더 이슈)
+    try:
+        col = _get_collection()
+        if col is not None:
+            data = col.get(include=["documents", "metadatas"], limit=col.count())
+            _LEX_CACHE = {"documents": data["documents"], "metadatas": data["metadatas"]}
+            return _LEX_CACHE
+    except Exception as e:
+        logger.warning(f"[CorpusSearch] ChromaDB unreadable, XML fallback: {e}")
+    # STATE G5 폴백: ChromaDB 없이 XML에서 직접 렉시콘 구성 (매니페스트 고정 판본)
+    try:
+        from pathlib import Path
+        from compliance.rag.parser import LawXMLParser
+
+        laws_dir = Path(__file__).resolve().parent.parent.parent / "data" / "laws"
+        docs, metas = [], []
+        for xml_path in sorted(laws_dir.glob("*.xml")):
+            try:
+                chunks = LawXMLParser(xml_path).parse_articles()
+            except Exception as e:
+                logger.warning(f"[CorpusSearch] XML parse skip {xml_path.name}: {e}")
+                continue
+            for ch in chunks:
+                docs.append(ch["content"])
+                metas.append(ch["metadata"])
+        if not docs:
+            return None
+        logger.info(f"[CorpusSearch] XML-direct lexicon: {len(docs)} chunks (no ChromaDB)")
+        _LEX_CACHE = {"documents": docs, "metadatas": metas}
+        return _LEX_CACHE
+    except Exception as e:
+        logger.warning(f"[CorpusSearch] XML fallback failed: {e}")
         return None
-    data = col.get(include=["documents", "metadatas"], limit=col.count())
-    _LEX_CACHE = {"documents": data["documents"], "metadatas": data["metadatas"]}
-    return _LEX_CACHE
 
 
 def hybrid_corpus_search(query: str,
@@ -106,7 +134,9 @@ def golden_hit_rate(collection: Optional[Any] = None) -> Dict[str, Any]:
     골든셋 Hit@3 평가. 반환: {hit_rate, hits, total, details:[{query, hit, top_articles}]}
     """
     col = collection or _get_collection()
-    if col is None:
+    # STATE G5: 스토어 부재 시에도 XML 폴백 렉시콘으로 채점 (fresh 환경 거짓실패 방지).
+    # 단 manifest 고정 XML이 전부 없으면 0점 (코퍼스 자체가 없는 상태).
+    if col is None and _load_lexicon() is None:
         return {"hit_rate": 0.0, "hits": 0, "total": len(GOLDEN_QUERIES), "details": []}
 
     hits = 0

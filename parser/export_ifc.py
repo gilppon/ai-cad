@@ -108,7 +108,25 @@ def build_ifc_from_multi_floor(payloads: List[dict], *, out_ifc: str):
     다층 구조 기하학 정보(GeometryPayloads)로부터 정밀 BIM(IFC) 파일을 생성합니다.
     """
     out_ifc = str(resolve_output_path(out_ifc))
-    model = ifcopenshell.api.run("project.create_file", version="IFC4")
+    # STATE Phase 1.4: BIM図面審査(2026-04-01)는 IFC2x3 + PDF 동시제출이 표준.
+    # IFC4 단독은 심사 참고자료로도 불리하므로 IFC2X3을 기본으로 고정한다.
+    # IFC2X3은 owner history 필수이므로 application/person/organisation 선행 생성.
+    model = ifcopenshell.api.run("project.create_file", version="IFC2X3")
+    _org = ifcopenshell.api.run(
+        "owner.add_organisation", model, identification="Kodari", name="Kodari Dev Legion"
+    )
+    ifcopenshell.api.run(
+        "owner.add_application", model, application_developer=_org,
+        version="1.0", application_full_name="Kodari CAD SaaS",
+        application_identifier="KodariCAD",
+    )
+    _person = ifcopenshell.api.run(
+        "owner.add_person", model, identification="Kodari", family_name="DevLegion"
+    )
+    ifcopenshell.api.run(
+        "owner.add_person_and_organisation", model, person=_person, organisation=_org
+    )
+    ifcopenshell.api.run("owner.create_owner_history", model)
     project = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcProject", name="CAD_SaaS_MVP_Advanced")
     ifcopenshell.api.run("unit.assign_unit", model)
     context = ifcopenshell.api.run("context.add_context", model, context_type="Model")

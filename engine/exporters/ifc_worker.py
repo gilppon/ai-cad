@@ -37,7 +37,7 @@ def run(payload: dict) -> dict:
     wall_count = sum(len(f.get("walls", [])) for f in floors)
     return {
         "success": True,
-        "format": "IFC4",
+        "format": "IFC2X3",
         "exported_file": target,
         "space_count": space_count,
         "wall_count": wall_count,

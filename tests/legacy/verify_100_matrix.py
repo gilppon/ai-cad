@@ -2,7 +2,7 @@
 100-Point Validation Matrix v2 — 진위 검증형 벤치마크 (SP4).
 
 v1.0 대비 변경 (code_remediation_plan_v1.0 §5):
-  - D2.2 RAG: 자기노드 자기검색 폐지 → 레포 내부 e-Gov 실코퍼스(926청크) Hit@3 채점
+  - D2.2 RAG: 자기노드 자기검색 폐지 → 레포 내부 e-Gov 실코퍼스(기준법·시행령·省에네法 3法) Hit@3 채점
   - D3: 가짜 스텁 채점 폐지 → 실 ifcopenshell 재파싱(10) + 견적 E2E(10) + 라운드트립 성능 실측(5)
   - D5: fail-closed 결제 게이트·경로순회 차단 실측 포함
   - 도메인 게이트: 어느 도메인이든 60% 미달 시 전체 실패
@@ -19,6 +19,8 @@ import time
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.path.insert(0, os.path.dirname(__file__))
+# STATE Phase 0.5: tests/legacy로 이동 — 레포 루트를 path에 복원해야 top-level 패키지 import 가능
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 # ================================================================
@@ -133,7 +135,7 @@ def run_100_point_benchmark():
           f"{scores['2.1_deterministic_rules']}/15점 ({track_a_correct}/{len(golden_cases)} + "
           f"{track1_correct}/{len(track1_cases)})")
 
-    # 2.2 RAG 실코퍼스 적중률 (10점) - 자기검색 폐지, 926청크 실데이터 Hit@3
+    # 2.2 RAG 실코퍼스 적중률 (10점) - 자기검색 폐지, 3法 실데이터 Hit@3
     from compliance.rag.corpus_search import golden_hit_rate
     rag_result = golden_hit_rate()
     rag_rate = rag_result["hit_rate"]
@@ -183,7 +185,8 @@ def run_100_point_benchmark():
         n_space = len(model.by_type("IfcSpace"))
         n_wall = len(model.by_type("IfcWallStandardCase"))
         schema_name = model.schema
-        export_ok = (n_project >= 1 and n_space >= 2 and n_wall >= 1 and schema_name == "IFC4")
+        # STATE: BIM図面審査 표준은 IFC2X3. IFC4 레거시는 감점 없이 통과하되 표기한다.
+        export_ok = (n_project >= 1 and n_space >= 2 and n_wall >= 1 and schema_name in ("IFC2X3", "IFC4"))
         reopen_detail = f"(IfcProject={n_project}, IfcSpace={n_space}, IfcWall={n_wall}, {schema_name})"
     except Exception as e:
         reopen_detail = f"(export/reopen failed: {e})"

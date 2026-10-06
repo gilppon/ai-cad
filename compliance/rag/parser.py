@@ -182,7 +182,7 @@ if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding="utf-8")
     
-    test_file = Path("e:/project/cad_saas_mvp/data/laws/325AC0000000201.xml")
+    test_file = Path(__file__).resolve().parent.parent.parent / "data" / "laws" / "325AC0000000201.xml"
     if test_file.exists():
         logger.info(f"Testing parser on: {test_file}")
         parser = LawXMLParser(test_file)

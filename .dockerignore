@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.git/
+.next/
+node_modules/
+uploads/
+out/
+vector_store/
+sessions/
+*.tsbuildinfo
+.env
+.env.local
+.pytest_cache/

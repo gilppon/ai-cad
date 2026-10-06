@@ -1,0 +1,39 @@
+name: web
+
+on:
+  push:
+    paths:
+      - "web/**"
+  pull_request:
+    paths:
+      - "web/**"
+
+jobs:
+  typescript-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint -- --max-warnings=0
+      - name: Build
+        run: npm run build
+      - name: Mock residue gate (STATE G3)
+        # NOTE: dashboard/page.tsx의 C2 이력 주석에 과거 가짜 씬 이름이 인용되어 있다.
+        # 게이트는 실제 코드(식별자·URL·렌더링 상수)만 검사하고 이력 주석은 제외한다.
+        run: |
+          if grep -rn "mock_project_123\|mock-stripe\.japanbuild\|ACTIVE SCENE" src/; then
+            echo "mock residue found"; exit 1;
+          fi

@@ -281,6 +281,18 @@ def extract_room_result_from_page(
 
     logger.info(f"[extract_room_result_from_page] rooms: {len(room_res.rooms)}")
 
+    # 8.5) 개구부 후보 (STATE C8): Step-6.5 벽선에서 wall-gap 도출 → debug + JSON 기록
+    try:
+        from parser.openings import derive_openings, summarize_openings
+        openings = derive_openings(walls_lines)
+        room_res.debug["_openings"] = json.dumps(summarize_openings(openings))
+        openings_json_path = out_path / f"openings_page{pno}.json"
+        with open(openings_json_path, "w", encoding="utf-8") as f:
+            json.dump(openings, f, ensure_ascii=False)
+        room_res.debug["_openings_json"] = str(openings_json_path)
+    except Exception as oe:
+        logger.warning(f"[*] 개구부 추출 스킵: {oe}")
+
     # 부가 데이터: 파이프라인 카운트를 debug에 추가 (리포트용)
     room_res.debug["_pipeline_counts"] = json.dumps({
         "raw": len(raw),

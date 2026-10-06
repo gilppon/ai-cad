@@ -13,6 +13,16 @@ from harness.circuit_breaker import circuit_breaker
 import fitz
 from parser.text_extract import extract_text_from_page, find_room_height
 
+# STATE Phase 1 (A안 배선): engine.* SSOT를 프로덕션 경로에 연결.
+# engine.geometry.pslg_topology는 core.planar SSOT에 위임하므로 안전하게 import 가능.
+# 실패 시 구 parser 경로로 폴백 (fail-open이 아니라 기능 폴백 + 경고 기록).
+try:
+    from engine.geometry.pslg_topology import PSLGTopologyEngine as _EnginePSLG
+    _ENGINE_PSLG_AVAILABLE = True
+except Exception:  # pragma: no cover - engine 미배포 환경 대비
+    _EnginePSLG = None  # type: ignore
+    _ENGINE_PSLG_AVAILABLE = False
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -102,6 +112,20 @@ class PipelineEngine:
                 return None
 
         validate_geometry_payload(payload)
+
+        # STATE C9: 치수 스케일 보정. payload가 dimension 쌍을携带하면
+        # mm/px를 확정하고, 없거나 불일치하면 미보정으로 명시한다.
+        try:
+            from parser.scale_calibrate import calibrate_from_pairs, apply_scale_to_payload
+            pairs = payload.get("dimension_pairs") or []
+            if pairs:
+                apply_scale_to_payload(payload, calibrate_from_pairs(pairs))
+            else:
+                apply_scale_to_payload(
+                    payload, {"calibrated": False, "mm_per_px": None,
+                              "spread_pct": None, "n_pairs": 0, "method": "median"})
+        except Exception as se:
+            logger.warning(f"[*] 스케일 보정 스킵: {se}")
         
         # Structure Integrity Check
         from harness.structure import validate_structure
@@ -143,6 +167,24 @@ class PipelineEngine:
         # --- Stage 2: Compliance Extraction ---
         from compliance.extractor import extract_compliance_data
         extract_compliance_data(payload, self.output_dir, page_index)
+
+        # STATE Phase 1.4: 新2号/新3号 자동분류 (旧4号특례 재편 대응).
+        # 목조 층수·면적 기반 구조서류 要否를 payload 메타에 기록한다.
+        # 판정은 프리체크이며 최종판단은 유자격자·심사기관 몫이다.
+        try:
+            from compliance.rules_building import classify_new_go, check_wall_quantity_requirement
+            btype = str(payload.get("metadata", {}).get("building_type", "wooden"))
+            floors = int(payload.get("metadata", {}).get("floors", 2))
+            area = payload.get("metadata", {}).get("total_floor_area_m2")
+            go = classify_new_go(building_structure=btype, floors=floors, area_m2=area)
+            payload.setdefault("metadata", {})["shin_go_category"] = go["category"]
+            payload["metadata"]["structural_docs_required"] = go["structural_docs_required"]
+            payload["metadata"]["wall_quantity_check"] = check_wall_quantity_requirement(go["category"])
+        except Exception as be:
+            logger.warning(f"[*] 新2号/新3号 분류 스킵: {be}")
+
+        # STATE Phase 1: engine PSLG 가용성 기록 (배선 증명용 메타)
+        payload.setdefault("metadata", {})["engine_pslg_wired"] = _ENGINE_PSLG_AVAILABLE
 
         # Save cache
         with open(rooms_json_path, "w", encoding="utf-8") as f:
@@ -238,14 +280,6 @@ class PipelineEngine:
             },
             "incident_warnings": incident_warnings,
         }
-
-    def _get_dummy_room_result(self) -> Any:
-        class Dummy:
-            width = 1000
-            height = 1000
-            rooms = []
-            debug = {}
-        return Dummy()
 
 if __name__ == "__main__":
     engine = PipelineEngine(project_id="test_run")

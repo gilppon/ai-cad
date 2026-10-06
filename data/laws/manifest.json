@@ -1,6 +1,6 @@
 {
-  "version": "1.0",
-  "retrieved_at": "2026-08-26",
+  "version": "1.1",
+  "retrieved_at": "2026-10-06",
   "source": "e-Gov 法令検索 (https://elaws.e-gov.go.jp/) - data/laws/ 원본 XML 기준",
   "revision_policy": "분기별 갱신 (SOP_commercial_launch.md). 갱신 시 retrieved_at과 각 법령의 개정 정보를 함께 갱신할 것.",
   "laws": [
@@ -14,7 +14,8 @@
       "law_num_ja": "昭和二十五年法律第二百一号",
       "promulgated_on": "1950-05-24",
       "law_type": "Act",
-      "file": "325AC0000000201.xml"
+      "file": "325AC0000000201.xml",
+      "sha256": "007dc20c1cb6a9a9968f16af9c80d782b67f863dc8d8bfda1b8801b650a8a6eb"
     },
     {
       "law_id": "325CO0000000338",
@@ -26,7 +27,8 @@
       "law_num_ja": "昭和二十五年政令第三百三十八号",
       "promulgated_on": "1950-11-16",
       "law_type": "CabinetOrder",
-      "file": "325CO0000000338.xml"
+      "file": "325CO0000000338.xml",
+      "sha256": "b230ed18e261b01c70c555c6483effd19eeb5ef4ae1d39402feff39778451dfb"
     },
     {
       "law_id": "427AC0000000053",
@@ -38,8 +40,9 @@
       "law_num_ja": "平成二十七年法律第五十三号",
       "promulgated_on": "2015-05-29",
       "law_type": "Act",
-      "file": null,
-      "note": "본문 XML 미수록 - BEI 규칙(compliance/rules_energy.py)은 공표 기준값으로 구현. 본문 수록 시 file 필드 갱신"
+      "file": "427AC0000000053.xml",
+      "sha256": "1c4b164c16b78f015e0ddda8d363e709934ab3ffc10005c0aca34b81528412c1",
+      "note": "2026-10-06 e-Gov API v1 취득·수록 완료. BEI 규칙(compliance/rules_energy.py)의 법령 근거本文."
     }
   ],
   "notes": [

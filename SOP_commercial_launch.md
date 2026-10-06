@@ -1,15 +1,16 @@
 # 🇯🇵 Japanbuild-BIM3D Compliance SaaS: Commercial Launch SOP
-> **Standard Operating Procedure (SOP) for Production Deployment & Live Operations**  
-> **Document Version:** 1.0.0 (Release-Ready)  
-> **Author:** Kodari Development Division (코다리 개발본부)  
-> **Classification:** Confidential - Internal Operations Only  
+> **Standard Operating Procedure (SOP) for Production Deployment & Live Operations**
+> **Document Version:** 1.0.1 (STATE v1.0 정정판 — 원 1.0.0 Release-Ready 표기는 미검증이므로 삭제)
+> **Author:** Kodari Development Division (코다리 개발본부)
+> **Classification:** Confidential - Internal Operations Only
+> **⚠️ 본 SOP v1.0.0에는 실행불가 구간이 확인됨 (§1 tenant_id RLS·§2 dist/celery 경로·§5 의무화 문구). 실배포 기록 전 운영 적용 금지. 정본은 `state.md` Phase 3 재집필본.**  
 
 ---
 
 ## 📌 Document Overview
 This document serves as the official, step-by-step Standard Operating Procedure (SOP) for transitioning the **Japanbuild-BIM3D Compliance** platform from the local integration staging environment to the production-grade live environment. 
 
-It guarantees flawless system scaling, airtight security posture under Japanese data protection laws (APPI), seamless Yen billing integrations via Stripe Japan, and high-availability operations for underground CAD inspection teams.
+It supports system scaling, security posture under Japanese data protection laws (APPI), Yen billing integrations via Stripe Japan, and high-availability operations for CAD inspection teams. Availability figures are measured post-launch only — no 100% guarantee is claimed.
 
 ---
 
@@ -207,8 +208,8 @@ Every project canvas and incident coordinate carries a `version` integer (starti
 
 ---
 
-## 5. Pre-Flight Checklist before Commercial Launch
-Before declaring `Release-Ready` to the board of directors:
+## 5. Pre-Flight Checklist before Commercial Launch (STATE v1.0 Go/No-Go와 통합 — 본 체크리스트만으로 출항 불가)
+Before declaring launch approval to the board of directors (requires `state.md` §9 Go/No-Go all-green):
 
 - [ ] Run Full Test Suite in production staging mode: `pytest tests/`
 - [ ] Confirm ReportLab Asian font paths are mapped inside Production Docker Container.
@@ -217,5 +218,5 @@ Before declaring `Release-Ready` to the board of directors:
 - [ ] Verify Japanese timezone `Asia/Tokyo` is default for all compliance checksheet date generations.
 
 ---
-> **코다리 개발본부 보고:**  
-> *"본 표준 운영 절차서는 일본 국토교통성(MLIT) BIM 의무화 법령 기준을 정확하게 만족하며, 향후 서비스 확장 시 엔지니어 교체 상황에서도 1시간 이내에 무중단 Production 셋업이 완료될 수 있도록 검증되었습니다. 대표님의 최종 검토를 요청드립니다. 충성!"*
+> **코다리 개발본부 보고 (STATE v1.0으로 정정):**
+> *"본 SOP v1.0.0의 'MLIT BIM 의무화 만족·1시간 무중단 셋업' 문구는 검증 근거 없는 자기선언으로 삭제한다(景表法 優良誤認 소지). 정식 런북은 스테이징 실배포 1회 기록 후 재집필한다. 본 도구는 建築確認プレチェック支援이며 判定을 확정하지 않는다. 最終判断은 유자격자·심사기관. 충성!"*

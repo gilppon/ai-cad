@@ -4,14 +4,18 @@ from pathlib import Path
 from compliance.rag.parser import LawXMLParser
 from compliance.rag.downloader import download_all_targets
 
-# DB 및 법령 저장소 경로
+# DB 및 법령 저장소 경로 (STATE G5: 레포 상대경로. 구 e:/project 절대경로 폐기)
 import logging
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path("e:/project/cad_saas_mvp/vector_store/chromadb")
-LAWS_DIR = Path("e:/project/cad_saas_mvp/data/laws")
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+DB_PATH = _REPO_ROOT / "vector_store" / "chromadb"
+LAWS_DIR = _REPO_ROOT / "data" / "laws"
 COLLECTION_NAME = "japanese_building_laws"
+
+# 적재 제외: 매니페스트·표본 (적재 대상이 아니라 판본 고정·참고용)
+_INGEST_EXCLUDE = {"manifest.json", "sample_laws.json"}
 
 def ingest_laws(batch_size: int = 100):
     """
@@ -47,9 +51,9 @@ def ingest_laws(batch_size: int = 100):
         except Exception as e:
             logger.error(f"    [-] Error parsing {xml_path.name}: {e}")
             
-    # JSON 파일 파싱 (신규 규정 추가 지원)
+    # JSON 파일 파싱 (신규 규정 추가 지원. 매니페스트·표본은 제외)
     import json
-    json_files = list(LAWS_DIR.glob("*.json"))
+    json_files = [p for p in LAWS_DIR.glob("*.json") if p.name not in _INGEST_EXCLUDE]
     for json_path in json_files:
         logger.info(f"[*] Parsing JSON: {json_path.name}")
         try:

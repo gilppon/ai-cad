@@ -5,7 +5,11 @@ from app.api.v1.endpoints import router as api_router
 
 app = FastAPI(
     title="Kodari CAD SaaS API",
-    description="CAD PDF to IFC Conversion Engine API",
+    description=(
+        "CAD PDF to IFC Conversion Engine API — "
+        "建築確認プレチェック支援 (1차 스크리닝). "
+        "最終判断は有資格者(建築士)・審査機関が行います. 本ツールは判定を確定しません."
+    ),
     version="0.1.0"
 )
 
@@ -34,12 +38,17 @@ app.add_middleware(
     allow_credentials=True,
     # SP4/H-3: 와일드카드 메서드 축소 - 실제 라우터가 사용하는 메서드만 허용
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-    allow_headers=["*"],
+    # STATE Phase 0.4: allow_credentials=True와 와일드카드 헤더 병존 해소
+    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
 )
 
 
 # 라우터 연결
 app.include_router(api_router, prefix="/api/v1")
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 @app.get("/")
 async def root():

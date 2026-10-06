@@ -138,7 +138,7 @@ def test_a2_real_ifc_worker_via_sandbox(tmp_path):
         model = ifcopenshell.open(str(target))
         assert len(model.by_type("IfcProject")) >= 1
         assert len(model.by_type("IfcSpace")) == 1
-        assert model.schema == "IFC4"
+        assert model.schema == "IFC2X3"  # STATE: BIM図面審査 표준 (IFC4→2X3 전환)
     finally:
         if target.exists():
             target.unlink()

@@ -26,13 +26,35 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile gate
-        run: python -m compileall parser compliance core harness takeoff pricing exporter app -q
+        run: python -m compileall parser compliance core harness takeoff pricing exporter app domain scene pipeline correction engine tests -q
+
+      - name: Forbidden-phrase gate (STATE 0.1)
+        run: |
+          python - <<'PY'
+          import subprocess, sys
+          pats = ["BIM 의무화 완벽", "정확하게 만족", "비즈니스 가용성을 100% 보장", "flawless system scaling", "airtight security posture"]
+          bad = []
+          out = subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout.splitlines()
+          targets = [f for f in out if f.endswith((".py", ".tsx", ".ts")) and not f.startswith("tests/legacy/")]
+          import pathlib
+          for pat in pats:
+              for f in targets:
+                  try:
+                      t = pathlib.Path(f).read_text(encoding="utf-8", errors="ignore")
+                  except Exception:
+                      continue
+                  if pat in t:
+                      bad.append(f"{f}: {pat}")
+          if bad:
+              print("\n".join(bad)); sys.exit(1)
+          print("forbidden-phrase gate OK")
+          PY
 
       - name: Unit / Integration tests
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q --ignore=tests/legacy
 
       # SP4/H-4: 진위 검증형 벤치마크 게이트 (도메인 60% 미달·상수 점수 대입 시 실패)
       - name: Validation matrix v2 (100-point honest benchmark)
-        run: python verify_100_matrix.py
+        run: python tests/legacy/verify_100_matrix.py
 
   # TypeScript 프론트 게이트는 web/ 의존성 설치 구조 정리 후 추가 예정 (부록 C 후속-4)

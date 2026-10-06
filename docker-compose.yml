@@ -1,33 +1,45 @@
-version: '3.8'
-
 services:
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   api-server:
     build: .
     ports:
       - "8000:8000"
     volumes:
-      - .:/app
       - ./uploads:/app/uploads
       - ./out:/app/out
+    env_file:
+      - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   celery-worker:
     build: .
     command: celery -A app.worker.celery_app worker --loglevel=info
     volumes:
-      - .:/app
       - ./uploads:/app/uploads
       - ./out:/app/out
+    env_file:
+      - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - redis
-      - api-server
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
